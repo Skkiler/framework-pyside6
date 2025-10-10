@@ -201,13 +201,3 @@ def build(task_runner=None, theme_service=None):
 ```
 
 Se não existir, o sistema faz **autodescoberta automática**.
-
----
-
-## 📜 Licença
-
-MIT © 2025 - Seu Projeto / Framework UI
-
----
-
-💡 **Dica:** Combine este framework com APIs REST, scripts de automação ou bases de dados para criar ferramentas poderosas e totalmente customizadas.

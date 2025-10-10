@@ -36,12 +36,16 @@ class HomePage(QWidget):
 
         # Botão assíncrono existente
         btn_async = AsyncTaskButton(
-            "Rodar processo B (assíncrono)",
-            task_runner,
-            "proc_B",
-            {"heavy": True},
-            toast_success="Processo B finalizado",
-            toast_error="Processo B falhou",
+            "Dormir 5s (assíncrono)",
+            SleepRunner(),
+            "ignored",
+            {},
+            parent=self,
+            toast_success="Concluído!",
+            toast_error="Falhou",
+            use_overlay=True,
+            overlay_parent=self,
+            overlay_message="Processando dados…"
         )
         lay.addWidget(btn_async)
 
@@ -73,3 +77,9 @@ class HomePage(QWidget):
 # ====== FACTORY para o registry ======
 def build(task_runner=None, theme_service=None):
     return HomePage.build(task_runner=task_runner, theme_service=theme_service)
+
+class SleepRunner:
+    def run_task(self, name: str, payload: dict) -> dict:
+        import time
+        time.sleep(5)                 # “trabalho”
+        return {"ok": True, "code": 1, "data": {"message": "ok"}}

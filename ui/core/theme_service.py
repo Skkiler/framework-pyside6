@@ -12,6 +12,9 @@ from ..services.qss_renderer import load_base_qss, render_qss_from_base
 from .settings import Settings
 from .interface_ports import IThemeRepository
 
+
+# ---------- Helpers ----------
+
 def _is_hex(s: Any) -> bool:
     return isinstance(s, str) and s.strip().startswith("#")
 
@@ -22,6 +25,12 @@ def _lerp(a: QColor, b: QColor, t: float) -> QColor:
         int(a.blue()  + (b.blue()  - a.blue())  * t),
         int(a.alpha() + (b.alpha() - a.alpha()) * t),
     )
+
+def _rgba_from_hex(hex_str: str, alpha: float) -> str:
+    c = QColor(hex_str)
+    a = max(0.0, min(1.0, float(alpha)))
+    return f"rgba({c.red()},{c.green()},{c.blue()},{a:.2f})"
+
 
 class ThemeService(QObject):
     themeApplied = Signal(str)
@@ -105,8 +114,19 @@ class ThemeService(QObject):
                 pal.setColor(getattr(QPalette, role_name), QColor(hex_color))
         app.setPalette(pal)
 
-        # 2) QSS (base.qss + tokens “vars” + {qss.*} se houver)
+        # 2) QSS (base.qss + tokens “vars” + tokens derivados)
         tokens = theme.get("vars") or theme
+        if not isinstance(tokens, dict):
+            tokens = {}
+
+        # Derivado: cor do painel do LoadingOverlay com ~20% de opacidade da cor 'slider'
+        tokens = dict(tokens)  # não muta o original
+        checkbox_hex = tokens.get("checkbox")
+        if isinstance(checkbox_hex, str) and checkbox_hex.startswith("#"):
+            tokens["loading_overlay_bg"] = _rgba_from_hex(checkbox_hex, 0.05)
+        else:
+            tokens["loading_overlay_bg"] = "rgba(255,255,255,0.12)"  # fallback sutil
+
         qss = render_qss_from_base(
             self._base_qss,
             tokens,

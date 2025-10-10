@@ -361,3 +361,21 @@ QToolTip {
   padding: 4px 6px;
   border-radius: 8px;
 }
+
+/* =========================
+   LOADING OVERLAY
+   ========================= */
+QWidget#LoadingOverlay {
+  background: transparent;         /* overlay transparente (bloqueia só por estar em cima) */
+}
+
+QFrame#LoadingPanel {
+  /* painel central: mesma cor do 'slider' com ~20% de opacidade */
+  background: {loading_overlay_bg};
+  border: 1px solid {box_border};
+  border-radius: 12px;
+}
+
+QFrame#LoadingPanel QLabel {
+  color: {btn_text};               /* texto visível sobre o overlay */
+}
