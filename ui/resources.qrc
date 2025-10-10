@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/">
+        <!-- Adicione icons/ e outros assets se quiser empacotar com rcc -->
+    </qresource>
+</RCC>

@@ -1,0 +1,21 @@
+{
+  "vars": {
+    "bg_start": "#1e1b29",
+    "bg_end": "#3b232d",
+    "bg": "#1e1b29",
+    "surface": "#2a2230",
+    "text": "#f8f8f2",
+    "input_bg": "#121017",
+    "btn": "#270404",
+    "btn_hover": "#5d0909",
+    "btn_text": "#ffffff",
+    "checkbox": "#d04545",
+    "slider": "#e11717",
+    "cond_selected": "#0b0b0b",
+    "box_border": "#ad8daa",
+    "hover": "#5d0909",
+    "text_hover": "#ffffff",
+    "window_bg": "#1e1b29",
+    "accent": "#5d0909"
+  }
+}
