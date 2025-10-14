@@ -5,11 +5,11 @@ from typing import Optional
 
 from PySide6.QtCore import (
     Qt, QRect, QPoint, QEasingCurve, QPropertyAnimation, QEvent, QSize, QObject,
-    QParallelAnimationGroup, QSequentialAnimationGroup, QTimer
+    QParallelAnimationGroup, QSequentialAnimationGroup, QTimer, QEventLoop
 )
 from PySide6.QtGui import QMouseEvent, QKeySequence, QCursor, QShortcut
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QGraphicsDropShadowEffect
+    QMainWindow, QWidget, QVBoxLayout, QGraphicsDropShadowEffect, QDialog
 )
 
 # --------- TUNÁVEIS ----------------------------------------------------------
@@ -697,3 +697,60 @@ class FramelessWindow(QMainWindow):
         if self._is_maximized:
             self.unsetCursor()
         super().resizeEvent(e)
+
+
+class FramelessDialog(FramelessWindow):
+    """Dialog modal baseado no FramelessWindow (com exec())"""
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        # comportamento de diálogo modal (sem barra nativa)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setWindowModality(Qt.ApplicationModal)
+        self._result_code = QDialog.Rejected
+
+        # dimensionamento mínimo confortável para prompts
+        self.setMinimumSize(360, 180)
+
+    # API de diálogo
+    def accept(self):
+        self._result_code = QDialog.Accepted
+        # animação de saída já existente
+        try:
+            self.close_with_shrink_fade()
+        except Exception:
+            self.close()
+
+    def reject(self):
+        self._result_code = QDialog.Rejected
+        try:
+            self.close_with_shrink_fade()
+        except Exception:
+            self.close()
+
+    def exec(self) -> int:
+        # mostra com um fadezinho (reaproveita showEvent do FramelessWindow)
+        self.show()
+        loop = QEventLoop(self)
+        # quando fechar, quebra o loop
+        self.destroyed.connect(loop.quit)
+        loop.exec()
+        return self._result_code
+    
+    def connect_titlebar(self, titlebar_widget: QWidget):
+        """Conecta a titlebar, mas mantém APENAS o botão de fechar visível."""
+        super().connect_titlebar(titlebar_widget)
+
+        # Esconde botões que não queremos no diálogo
+        for attr in ("btn_min", "btn_max", "_btn_settings"):
+            if hasattr(titlebar_widget, attr):
+                try:
+                    getattr(titlebar_widget, attr).hide()
+                except Exception:
+                    pass
+    
+    def eventFilter(self, obj: QObject, ev):
+        # Consumir duplo-clique na titlebar (não maximiza em diálogos)
+        from PySide6.QtCore import QEvent
+        if obj in getattr(self, "_draggables", []) and ev.type() == QEvent.MouseButtonDblClick:
+            return True
+        return super().eventFilter(obj, ev)

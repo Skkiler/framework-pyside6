@@ -16,6 +16,8 @@ from ..services.theme_repository_json import JsonThemeRepository
 
 from .frameless_window import FramelessWindow
 from ..widgets.titlebar import TitleBar
+from ..widgets.settings_sidebar import SettingsSidePanel
+from ..pages.settings_page import build as build_settings_page
 
 
 class AppShell(FramelessWindow):  # <<< trocamos QMainWindow -> FramelessWindow
@@ -65,6 +67,7 @@ class AppShell(FramelessWindow):  # <<< trocamos QMainWindow -> FramelessWindow
         self.titlebar = TitleBar(title, self, icon=icon_ref)
         root_v.addWidget(self.titlebar)
         self.connect_titlebar(self.titlebar)
+        self.titlebar.settingsRequested.connect(self._toggle_settings_panel)
 
         # Topbar (mantém assinatura original)
         self.topbar = TopBar(onHamburgerClick=self._toggle_sidebar, title=title)
@@ -82,6 +85,15 @@ class AppShell(FramelessWindow):  # <<< trocamos QMainWindow -> FramelessWindow
         self.sidebar = OverlaySidePanel(parent=central, use_scrim=True, close_on_scrim=True, close_on_select=True)
         self.sidebar.pageSelected.connect(self._go)
 
+        # Painel de Configurações (sidebar da direita)
+        self._settings_widget = build_settings_page(theme_service=self.theme_service)
+        self.settings_panel = SettingsSidePanel(
+            parent=central,
+            content=self._settings_widget,
+            use_scrim=True,
+            close_on_scrim=True
+        )
+
     # ====== helper para maximizar/restaurar ======
     def _toggle_max_restore(self):
         if self.isMaximized():
@@ -90,6 +102,13 @@ class AppShell(FramelessWindow):  # <<< trocamos QMainWindow -> FramelessWindow
             self.showMaximized()
 
     # -------- public helpers --------
+    def _toggle_settings_panel(self):
+        """Abre ou fecha a sidebar de configurações."""
+        try:
+            self.settings_panel.toggle()
+        except Exception as e:
+            print("[ERRO] toggle settings panel:", e)
+    
     def register_page(self, route: str, widget: QWidget, label: str | None = None, show_in_sidebar: bool = True):
         self.router.register(route, widget)
         if show_in_sidebar:
@@ -127,3 +146,5 @@ class AppShell(FramelessWindow):  # <<< trocamos QMainWindow -> FramelessWindow
 
     def _go(self, route: str):
         self.router.go(route)
+
+

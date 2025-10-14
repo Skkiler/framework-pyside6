@@ -2,21 +2,24 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QComboBox,
-    QHBoxLayout, QInputDialog, QMessageBox, QFrame,
-    QSpacerItem, QSizePolicy
+    QHBoxLayout, QFrame, QSpacerItem, QSizePolicy,
+    QToolButton, QMenu, QDialog, QLineEdit, QPushButton
 )
+from PySide6.QtGui import QIcon
 
 from ..core.theme_service import ThemeService
 from ..widgets.buttons import Controls
 from .theme_editor import ThemeEditorDialog
+from ..core.frameless_window import FramelessDialog
+from ..widgets.titlebar import TitleBar
 
 PAGE = {
     "route": "settings",
     "label": "Configurações",
-    "sidebar": True,
+    "sidebar": False,   # <— NÃO aparece mais na sidebar esquerda
     "order": 99,
 }
 
@@ -41,31 +44,39 @@ class SettingsPage(QWidget):
         hdr.setProperty("subtle", True)
         lt.addWidget(hdr)
 
-        row = QHBoxLayout(); row.setSpacing(8)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+
         row.addWidget(QLabel("Selecionar:"))
 
         self.combo = QComboBox()
+        # comportamento: combo expande, botão fica compacto à direita
+        self.combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.combo.setMinimumWidth(160)
-        self.combo.setMaximumWidth(260)
-        row.addWidget(self.combo)
+        self.combo.setMaximumWidth(16777215)
+        row.addWidget(self.combo, 1)
 
-        def _mk_btn(text: str, tip: str):
-            b = Controls.Button(text)
-            b.setToolTip(tip)
-            b.setFixedHeight(28)
-            b.setMinimumWidth(40)
-            b.setProperty("variant", "secondary")
-            b.setCursor(Qt.PointingHandCursor)
-            return b
+        # Botão de "três pontinhos" com menu (Criar/Editar/Excluir)
+        self.btn_more = QToolButton(self)
+        self.btn_more.setObjectName("TinyMenuButton")
+        self.btn_more.setToolTip("Opções de tema")
+        self.btn_more.setPopupMode(QToolButton.InstantPopup)
+        self.btn_more.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        self.btn_more.setAutoRaise(True)
+        self.btn_more.setFixedSize(26, 26)
+        self.btn_more.setText("⋯")  # texto => cor vem do QSS
 
-        btn_new  = _mk_btn("＋", "Novo tema")
-        btn_edit = _mk_btn("✏️", "Editar tema")
-        btn_del  = _mk_btn("🗑️", "Excluir tema")
-        btn_new.clicked.connect(self._new_theme)
-        btn_edit.clicked.connect(self._edit_theme)
-        btn_del.clicked.connect(self._delete_theme)
+        menu = QMenu(self.btn_more)
+        act_new  = menu.addAction("Criar tema")
+        act_edit = menu.addAction("Editar tema")
+        act_del  = menu.addAction("Excluir tema")
+        act_new.triggered.connect(self._new_theme)
+        act_edit.triggered.connect(self._edit_theme)
+        act_del.triggered.connect(self._delete_theme)
+        self.btn_more.setMenu(menu)
 
-        row.addWidget(btn_new); row.addWidget(btn_edit); row.addWidget(btn_del)
+        row.addWidget(self.btn_more, 0)
         row.addItem(QSpacerItem(20, 10, QSizePolicy.Expanding, QSizePolicy.Minimum))
         lt.addLayout(row)
 
@@ -86,7 +97,7 @@ class SettingsPage(QWidget):
         hdr_g.setProperty("subtle", True)
         lg.addWidget(hdr_g)
 
-        # Toggle Splash (toggle primeiro!)
+        # Toggle Splash
         splash_row = QHBoxLayout()
         splash_row.setContentsMargins(0, 0, 0, 0)
         splash_row.setSpacing(8)
@@ -96,10 +107,8 @@ class SettingsPage(QWidget):
         show_splash = bool(self._st.read("splash", True))  # default: True (mostrar)
         self.tgl_splash.setChecked(not show_splash)        # marcado => NÃO mostrar
 
-        # label dinâmica que muda conforme estado
         self.lbl_splash = QLabel()
         def _update_splash_label(checked: bool):
-            # checked True => splash desativada
             self.lbl_splash.setText(
                 "Splash de inicialização desativada" if checked
                 else "Mostrar splash na inicialização"
@@ -132,7 +141,85 @@ class SettingsPage(QWidget):
             lambda name: self.tm.apply(name, animate=True, persist=True)
         )
 
-    # ---------- helpers ----------
+    # ---------- helpers (frameless dialogs) ----------
+    def _prompt_text(self, title: str, label: str, initial: str = "") -> tuple[str, bool]:
+        """Dialogo frameless simples para entrada de texto."""
+        dlg = FramelessDialog(self)
+        root = QWidget(dlg)
+        v = QVBoxLayout(root); v.setContentsMargins(12, 12, 12, 12); v.setSpacing(10)
+
+        tb = TitleBar(title, parent=root)
+        dlg.connect_titlebar(tb)
+        v.addWidget(tb)
+
+        v.addWidget(QLabel(label, root))
+        edit = QLineEdit(root)
+        edit.setText(initial)
+        v.addWidget(edit)
+
+        btn_row = QHBoxLayout(); btn_row.setSpacing(8)
+        btn_ok = QPushButton("OK", root); btn_cancel = QPushButton("Cancel", root)
+        btn_ok.clicked.connect(dlg.accept); btn_cancel.clicked.connect(dlg.reject)
+        btn_row.addStretch(1); btn_row.addWidget(btn_ok); btn_row.addWidget(btn_cancel)
+        v.addLayout(btn_row)
+
+        dlg.setCentralWidget(root)
+        dlg.resize(420, 220)
+        dlg.shrink_to(QSize(420, 220), center=False)
+
+        ok = dlg.exec() == QDialog.Accepted
+        return edit.text(), ok
+
+    def _confirm(self, title: str, message: str) -> bool:
+        """Dialogo frameless de confirmação OK/Cancel."""
+        dlg = FramelessDialog(self)
+        root = QWidget(dlg)
+        v = QVBoxLayout(root); v.setContentsMargins(12, 12, 12, 12); v.setSpacing(10)
+
+        tb = TitleBar(title, parent=root)
+        dlg.connect_titlebar(tb)
+        v.addWidget(tb)
+
+        lab = QLabel(message, root); lab.setWordWrap(True)
+        v.addWidget(lab)
+
+        btn_row = QHBoxLayout(); btn_row.setSpacing(8)
+        btn_ok = QPushButton("OK", root); btn_cancel = QPushButton("Cancel", root)
+        btn_ok.clicked.connect(dlg.accept); btn_cancel.clicked.connect(dlg.reject)
+        btn_row.addStretch(1); btn_row.addWidget(btn_ok); btn_row.addWidget(btn_cancel)
+        v.addLayout(btn_row)
+
+        dlg.setCentralWidget(root)
+        dlg.resize(420, 200)
+        dlg.shrink_to(QSize(420, 200), center=False)
+
+        return dlg.exec() == QDialog.Accepted
+
+    def _info(self, title: str, message: str) -> None:
+        """Dialogo frameless informativo com um botão OK."""
+        dlg = FramelessDialog(self)
+        root = QWidget(dlg)
+        v = QVBoxLayout(root); v.setContentsMargins(12, 12, 12, 12); v.setSpacing(10)
+
+        tb = TitleBar(title, parent=root)
+        dlg.connect_titlebar(tb)
+        v.addWidget(tb)
+
+        lab = QLabel(message, root); lab.setWordWrap(True)
+        v.addWidget(lab)
+
+        btn_row = QHBoxLayout(); btn_row.setSpacing(8)
+        btn_ok = QPushButton("OK", root)
+        btn_ok.clicked.connect(dlg.accept)
+        btn_row.addStretch(1); btn_row.addWidget(btn_ok)
+        v.addLayout(btn_row)
+
+        dlg.setCentralWidget(root)
+        dlg.resize(420, 180)
+        dlg.shrink_to(QSize(420, 180), center=False)
+        dlg.exec()
+
+    # ---------- data/load ----------
     def _reload(self):
         current = self.tm.current() or self.tm.load_selected_from_settings()
         names = self.tm.available() or []
@@ -148,13 +235,13 @@ class SettingsPage(QWidget):
 
     # ---------- actions ----------
     def _new_theme(self):
-        name, ok = QInputDialog.getText(self, "Novo tema", "Nome do tema:")
+        name, ok = self._prompt_text("Novo tema", "Nome do tema:")
         if not ok or not name.strip():
             return
         name = name.strip()
 
         if name in (self.tm.available() or []):
-            QMessageBox.warning(self, "Tema existente", f"Já existe um tema chamado '{name}'.")
+            self._info("Tema existente", f"Já existe um tema chamado '{name}'.")
             return
 
         base_name = self.tm.current() or (self.tm.available()[0] if self.tm.available() else None)
@@ -192,9 +279,9 @@ class SettingsPage(QWidget):
             return
         names = self.tm.available() or []
         if len(names) <= 1:
-            QMessageBox.information(self, "Não permitido", "Você não pode excluir o único tema disponível.")
+            self._info("Não permitido", "Você não pode excluir o único tema disponível.")
             return
-        if QMessageBox.question(self, "Confirmar", f"Deseja excluir o tema '{name}'?") != QMessageBox.Yes:
+        if not self._confirm("Confirmar", f"Deseja excluir o tema '{name}'?"):
             return
 
         self.tm._repo.delete_theme(name)

@@ -417,3 +417,59 @@ QFrame#LoadingPanel {
 QFrame#LoadingPanel QLabel {
   color: {btn_text};               /* texto visível sobre o overlay */
 }
+
+/* Sidebar de settings: escura/transparente e com CANTO SUP ESQUERDO arredondado */
+#SettingsSidePanel {
+    background: rgba(0, 0, 0, 0.35);
+    border-left: 1px solid palette(mid);
+    border-top-left-radius: 10px;     /* <-- só este canto */
+}
+#SettingsSidePanelHeader {
+    background: rgba(0, 0, 0, 0.18);
+    border-bottom: 1px solid palette(mid);
+    border-top-left-radius: 10px;     /* acompanha o painel */
+}
+
+/* Botão da engrenagem na titlebar: sem fundo, contorno, reage ao tema */
+#TitlebarSettingsButton {
+    border: 1px solid palette(mid);
+    background: transparent;
+    color: palette(window-text);
+    padding: 3px 7px;
+    border-radius: 6px;
+}
+#TitlebarSettingsButton:hover {
+    border-color: palette(highlight);
+    background: rgba(255,255,255,0.06);
+}
+#TitlebarSettingsButton:pressed {
+    background: rgba(255,255,255,0.12);
+}
+
+/* Botão de 3 pontinhos (depois da combo) */
+#TinyMenuButton {
+    border: 1px solid palette(mid);
+    background: transparent;
+    color: palette(window-text);
+    padding: 0;
+    border-radius: 6px;
+}
+#TinyMenuButton:hover   { border-color: palette(highlight); }
+#TinyMenuButton:pressed { background: rgba(255,255,255,0.12); }
+#TinyMenuButton::menu-indicator { image: none; }  /* remove setinha padrão */
+
+/* Menu das opções */
+QMenu {
+    background: palette(base);
+    border: 1px solid palette(mid);
+    border-radius: 8px;
+    padding: 6px 0;
+}
+QMenu::item {
+    padding: 6px 14px;
+    border-radius: 0;
+}
+QMenu::item:selected {
+    background: palette(highlight);
+    color: palette(highlighted-text);
+}

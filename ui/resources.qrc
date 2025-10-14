@@ -1,5 +1,7 @@
 <RCC>
-    <qresource prefix="/">
-        <!-- Adicione icons/ e outros assets se quiser empacotar com rcc -->
-    </qresource>
+  <qresource prefix="/">
+    <!-- ... seus outros arquivos ... -->
+    <file>assets/icons/gear_outline.svg</file>
+    <file>assets/icons/more_horiz.svg</file>
+  </qresource>
 </RCC>

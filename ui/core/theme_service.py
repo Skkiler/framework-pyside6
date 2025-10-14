@@ -134,14 +134,15 @@ class ThemeService(QObject):
         )
 
         try:
+            app.setStyleSheet(qss)
             self._root.setStyleSheet(qss)
         except Exception:
-            # último recurso para não travar se houver erro de QSS
             safe = "\n".join(
                 line for line in qss.splitlines()
                 if ("{" in line and "}" in line) or ":" in line
             )
             try:
+                app.setStyleSheet(safe)
                 self._root.setStyleSheet(safe)
             except Exception:
                 pass
