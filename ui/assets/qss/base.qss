@@ -1,9 +1,26 @@
-/*base.qss*/
-
 /* =========================
    BASE VISUAL / TIPOGRAFIA
    ========================= */
-QMainWindow, QWidget#RootWindow, QDialog {
+
+/* Frameless: quem pinta o fundo é o frame interno */
+#FramelessFrame {
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 {bg_start}, stop:1 {bg_end});
+  color: {text};
+  font-family: 'Segoe UI', Arial, sans-serif;
+  font-size: 12px;
+  border-radius: 8px;
+}
+
+/* Conteúdo deve ser transparente para herdar do frame */
+#FramelessContent,
+#AppRoot,
+QWidget#RootWindow {
+  background: transparent;
+  color: {text};
+}
+
+/* Fallback para telas/diálogos que não usam o FramelessFrame */
+QMainWindow, QDialog {
   background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 {bg_start}, stop:1 {bg_end});
   color: {text};
   font-family: 'Segoe UI', Arial, sans-serif;
@@ -19,13 +36,33 @@ QWidget, QLabel { color: {text}; }
 #Scrim { background: rgba(0,0,0,0.35); }
 
 /* =========================
+   TITLEBAR CUSTOM
+   ========================= */
+
+#TitleBarButton {
+  background: transparent;   /* padrão transparente */
+  color: {text};             /* cor vem do tema */
+  border: none;
+  border-radius: 6px;
+  padding: 0 8px;            /* dá um respiro ao redor do glifo */
+}
+
+/* use tokens já existentes do tema */
+#TitleBarButton:hover   { background: {hover};     color: {text}; }
+#TitleBarButton:pressed { background: {accent};    color: {btn_text}; }
+
+/* ícone do app maior + alinhamento */
+#TitleBarAppIcon { margin-right: 8px; }
+
+/* =========================
    BARRA SUPERIOR / PAINÉIS
    ========================= */
 #TopBar {
   background: {content_bg};
   border-bottom: 1px solid {box_border};
-  border-top-left-radius: 10px;
-  border-top-right-radius: 10px;
+  /* importante: sem radius no topo para não “brigar” com o frame arredondado */
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
 
 /* SidePanel */
@@ -34,7 +71,7 @@ QWidget, QLabel { color: {text}; }
   border-right: 1px solid {box_border};
   border-top-left-radius: 12px;
   border-bottom-left-radius: 12px;
-  /* novo: canto superior-direito suavizado */
+  /* canto superior-direito suave quando o painel não encosta no topo do frame */
   border-top-right-radius: 8px;
 }
 #SidePanelHeader {
@@ -109,6 +146,7 @@ QListWidget::item:selected{
 /* Seleção mais suave dentro da sidebar */
 #SidePanel QListWidget::item:selected {
   background: {cond_selected};
+  color: {text};
   border-radius: 8px;
 }
 

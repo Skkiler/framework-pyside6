@@ -19,6 +19,31 @@ def _default_gif_path() -> Optional[str]:
     return None
 
 
+# -------- Compat de eventos (Qt/PySide variam por versão) --------------------
+# Constrói uma tupla apenas com os tipos que EXISTEM no runtime atual
+def _opt_events(*names: str) -> tuple:
+    present = []
+    for n in names:
+        v = getattr(QEvent, n, None)
+        if v is not None:
+            present.append(v)
+    return tuple(present)
+
+# Eventos “comuns” que sempre existem
+_BASE_LAYOUT_EVENTS = (
+    QEvent.Resize, QEvent.Move, QEvent.Show, QEvent.ShowToParent, QEvent.WindowStateChange
+)
+
+# Eventos opcionais (se existirem na sua versão, tratamos; senão, ignoramos)
+_DPI_SCREEN_EVENTS = _opt_events(
+    "ScreenChangeInternal",         # Qt >= 5.14/6.x
+    "DevicePixelRatioChange",       # algumas versões
+    "ApplicationFontChange",        # fallback: pode disparar realayout
+    "FontChange",                   # idem
+    "PaletteChange",                # temas podem provocar reflow
+    "HighDpiScaleFactorChange",     # algumas builds Qt6
+)
+
 class LoadingOverlay(QWidget):
     def __init__(
         self,
@@ -27,7 +52,6 @@ class LoadingOverlay(QWidget):
         message: str = "Carregando…",
         gif_path: Optional[str] = None,
         block_input: bool = True,
-        # >>> mude o padrão para "theme"
         background_mode: str = "theme",                # "theme" | "transparent" | "gradient"
         gradient_colors: Optional[Tuple[str, str]] = None,
     ):
@@ -40,6 +64,14 @@ class LoadingOverlay(QWidget):
         self._movie: Optional[QMovie] = None
         self._block_input = bool(block_input)
         self._active = False
+
+        # Guarda refs e instala filtros no parent e na janela top-level
+        self._parent = parent
+        if self._parent:
+            self._parent.installEventFilter(self)
+        top = self._parent.window() if self._parent else None
+        if top and top is not self._parent:
+            top.installEventFilter(self)
 
         self._panel = QFrame(self)
         self._panel.setObjectName("LoadingPanel")
@@ -116,25 +148,54 @@ class LoadingOverlay(QWidget):
             self._movie.stop()
         super().hide()
 
+    # ---------- Qt events ----------
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._reposition()
+        if self._movie:
+            self._apply_scaled_size()
+            self._movie.start()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._reposition_panel_only()
+
     # ---------- infra ----------
     def eventFilter(self, watched, event):
-        if watched is self.parent():
+        parent = self.parent()
+        top = parent.window() if parent else None
+
+        # Reage a mudanças do parent OU da janela top-level
+        if watched is parent or watched is top:
             et = event.type()
-            if et in (QEvent.Resize, QEvent.Move, QEvent.Show):
-                self._reposition()
-            elif et == QEvent.Hide:
+
+            # Parent/janela foram escondidos -> esconda overlay (mantém _active como está)
+            if et == QEvent.Hide:
                 if self.isVisible():
                     super().hide()
                 if self._movie:
                     self._movie.stop()
-            elif et == QEvent.ShowToParent:
+                return super().eventFilter(watched, event)
+
+            # Layout/state/screen changes
+            if et in _BASE_LAYOUT_EVENTS or et in _DPI_SCREEN_EVENTS:
                 if self._active:
+                    # Se o parent acabou de aparecer/voltou ao stack, reexiba o overlay
+                    if et in (QEvent.Show, QEvent.ShowToParent) and not self.isVisible():
+                        super().show()
+                        self.raise_()
+                        if self._movie:
+                            self._movie.start()
+
+                    # Sempre reposiciona quando ativo
                     self._reposition()
                     self.raise_()
-                    super().show()
                     if self._movie:
                         self._apply_scaled_size()
-                        self._movie.start()
+                        # Em mudanças de DPI/tela, garanta que o GIF reescale
+                        if et in _DPI_SCREEN_EVENTS:
+                            self._movie.start()
+
         return super().eventFilter(watched, event)
 
     def _reposition(self):
@@ -143,15 +204,22 @@ class LoadingOverlay(QWidget):
         if not par:
             return
         r = par.rect()
+        # Ajusta a geometria do OVERLAY para cobrir o parent
         self.setGeometry(QRect(r.left(), r.top(), r.width(), r.height()))
+        # E posiciona o painel com base no TAMANHO ATUAL do overlay
+        self._reposition_panel_only()
+        self._apply_scaled_size()
 
+    def _reposition_panel_only(self):
+        """Reposiciona somente o painel com base no tamanho atual do overlay."""
+        r = self.rect()
+        if r.isNull():
+            return
         pw = max(220, int(r.width() * 0.5))
         ph = max(160, int(r.height() * 0.5))
         px = (r.width() - pw) // 2
         py = (r.height() - ph) // 2
         self._panel.setGeometry(QRect(px, py, pw, ph))
-
-        self._apply_scaled_size()
 
     def _apply_scaled_size(self):
         """Mantém proporção do GIF: ocupa ~60% do menor lado do painel."""

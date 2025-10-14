@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Iterable
 
 from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout
+from PySide6.QtGui import QIcon
 
 from .router import Router
 from .settings import Settings
@@ -13,8 +14,11 @@ from ..widgets.topbar import TopBar
 from ..widgets.overlay_sidebar import OverlaySidePanel
 from ..services.theme_repository_json import JsonThemeRepository
 
+from .frameless_window import FramelessWindow
+from ..widgets.titlebar import TitleBar
 
-class AppShell(QMainWindow):
+
+class AppShell(FramelessWindow):  # <<< trocamos QMainWindow -> FramelessWindow
     def __init__(self, title: str, assets_dir: str, themes_dir: str, base_qss_path: str):
         super().__init__()
         self.setWindowTitle(title)
@@ -22,6 +26,10 @@ class AppShell(QMainWindow):
         self.resize(1100, 720)
 
         assets_dir_path = Path(assets_dir)
+
+        # --- ícone da aplicação (TitleBar) ---
+        icon_path = assets_dir_path / "icons" / "app.ico"
+        icon_ref = QIcon(str(icon_path)) if icon_path.exists() else None
 
         # --- cache local do projeto: ui/assets/cache ---
         self.cache_dir = assets_dir_path / "cache"
@@ -33,7 +41,7 @@ class AppShell(QMainWindow):
         except TypeError:
             self.settings = Settings()
 
-        self.router = Router()
+        self.router = Router()  # <<< mantém como era (sem parent)
 
         self.theme_service = ThemeService(
             repo=JsonThemeRepository(themes_dir),
@@ -47,13 +55,18 @@ class AppShell(QMainWindow):
         # -------- UI base --------
         central = QWidget()
         central.setProperty("role", "content")
-        self.setCentralWidget(central)
+        self.setCentralWidget(central)  # FramelessWindow coloca isso dentro do content()
 
         root_v = QVBoxLayout(central)
         root_v.setContentsMargins(0, 0, 0, 0)
         root_v.setSpacing(0)
 
-        # Topbar
+        # >>> NOVO: TitleBar custom (fica acima da TopBar)
+        self.titlebar = TitleBar(title, self, icon=icon_ref)
+        root_v.addWidget(self.titlebar)
+        self.connect_titlebar(self.titlebar)
+
+        # Topbar (mantém assinatura original)
         self.topbar = TopBar(onHamburgerClick=self._toggle_sidebar, title=title)
         root_v.addWidget(self.topbar)
 
@@ -68,12 +81,19 @@ class AppShell(QMainWindow):
         # OverlaySidePanel flutuante sobre o central widget (fora do layout)
         self.sidebar = OverlaySidePanel(parent=central, use_scrim=True, close_on_scrim=True, close_on_select=True)
         self.sidebar.pageSelected.connect(self._go)
-        # self.sidebar.set_close_on_select(True)
+
+    # ====== helper para maximizar/restaurar ======
+    def _toggle_max_restore(self):
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
 
     # -------- public helpers --------
     def register_page(self, route: str, widget: QWidget, label: str | None = None, show_in_sidebar: bool = True):
         self.router.register(route, widget)
         if show_in_sidebar:
+            # <<< mantém assinatura original da sua Sidebar: (route, label)
             self.sidebar.add_page(route, label or route)
 
     def _call_factory(self, factory, **deps):
