@@ -38,6 +38,7 @@ class FramelessWindow(QMainWindow):
         # Flags/atributos de janela
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WA_DeleteOnClose, True)
         self.setMouseTracking(True)
 
         # Estado interno
@@ -719,6 +720,7 @@ class FramelessDialog(FramelessWindow):
         self.setWindowModality(Qt.ApplicationModal)
         self._result_code = QDialog.Rejected
         self.setMinimumSize(360, 180)
+        self._loop = None
 
         # Política de centralização: "window" (padrão), "screen" ou "parent"
         self._center_mode: str = "window"
@@ -751,10 +753,18 @@ class FramelessDialog(FramelessWindow):
             self.resize(sh if sh.isValid() else QSize(max(self.minimumWidth(), 360), max(self.minimumHeight(), 180)))
         self._center_over_parent()
         self.show()
-        loop = QEventLoop(self)
-        self.destroyed.connect(loop.quit)
-        loop.exec()
+        self._loop = QEventLoop(self)
+        self._loop.exec()
+        self._loop = None
         return self._result_code
+    
+    def closeEvent(self, e):
+        try:
+            if self._loop is not None and self._loop.isRunning():
+                self._loop.quit()
+        except Exception:
+            pass
+        super().closeEvent(e)
 
     # ------------------- Integração com TitleBar -------------------
     def connect_titlebar(self, titlebar_widget: QWidget):

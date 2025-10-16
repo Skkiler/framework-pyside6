@@ -292,14 +292,10 @@ class SettingsPage(QWidget):
 
     # ---------- abrir editor (usando exec() via singleShot) ----------
     def _open_theme_editor(self, name: str, props: dict, on_accept=None):
-        """Abre o editor de temas. Usa exec() síncrono, mas agenda via singleShot
-        para evitar conflitos com QMenu e garantir que o loop esteja livre."""
-        def _run():
-            dlg = ThemeEditorDialog(name, props, self)
-            result = dlg.exec()
-            if on_accept and result == QDialog.Accepted:
-                on_accept(dlg)
-        QTimer.singleShot(0, _run)
+        dlg = ThemeEditorDialog(name, props, self)
+        result = dlg.exec()
+        if on_accept and result == QDialog.Accepted:
+            on_accept(dlg)
 
     # ---------- actions ----------
     def _new_theme(self):
