@@ -12,22 +12,12 @@
 }
 
 /* Conteúdo deve ser transparente para herdar do frame */
-#FramelessContent,
-#AppRoot,
-QWidget#RootWindow {
+#FramelessContent {
   background: transparent;
   color: {text};
 }
 
-/* Fallback para telas/diálogos que não usam o FramelessFrame */
-QMainWindow, QDialog {
-  background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 {bg_start}, stop:1 {bg_end});
-  color: {text};
-  font-family: 'Segoe UI', Arial, sans-serif;
-  font-size: 12px;
-}
-
-/* Textos padrão */
+/* Textos padrão (garante cor em widgets novos) */
 QWidget, QLabel { color: {text}; }
 
 /* =========================
@@ -38,20 +28,15 @@ QWidget, QLabel { color: {text}; }
 /* =========================
    TITLEBAR CUSTOM
    ========================= */
-
 #TitleBarButton {
-  background: transparent;   /* padrão transparente */
-  color: {text};             /* cor vem do tema */
+  background: transparent;
+  color: {text};
   border: none;
   border-radius: 6px;
-  padding: 0 8px;            /* dá um respiro ao redor do glifo */
+  padding: 0 8px;
 }
-
-/* use tokens já existentes do tema */
-#TitleBarButton:hover   { background: {hover};     color: {text}; }
-#TitleBarButton:pressed { background: {accent};    color: {btn_text}; }
-
-/* ícone do app maior + alinhamento */
+#TitleBarButton:hover   { background: {hover};  color: {text}; }
+#TitleBarButton:pressed { background: {accent}; color: {btn_text}; }
 #TitleBarAppIcon { margin-right: 8px; }
 
 /* =========================
@@ -60,18 +45,16 @@ QWidget, QLabel { color: {text}; }
 #TopBar {
   background: {content_bg};
   border-bottom: 1px solid {box_border};
-  /* importante: sem radius no topo para não “brigar” com o frame arredondado */
   border-top-left-radius: 0;
   border-top-right-radius: 0;
 }
 
-/* SidePanel */
+/* SidePanel (overlay) */
 #SidePanel {
   background: {content_bg};
   border-right: 1px solid {box_border};
   border-top-left-radius: 12px;
   border-bottom-left-radius: 12px;
-  /* canto superior-direito suave quando o painel não encosta no topo do frame */
   border-top-right-radius: 8px;
 }
 #SidePanelHeader {
@@ -80,8 +63,6 @@ QWidget, QLabel { color: {text}; }
   color: {text};
   padding: 6px 8px;
 }
-
-/* “caixinha” do hambúrguer na overlay */
 #SidePanel QToolButton {
   color: {text};
   background: transparent;
@@ -116,8 +97,6 @@ QGroupBox::title {
 /* =========================
    LISTAS / VIEWS / COMBOS
    ========================= */
-
-/* QListWidget (fechado) – bordas apenas no topo */
 QListWidget {
   background: {surface};
   border: 1px solid {box_border};
@@ -128,7 +107,6 @@ QListWidget {
   color: {text};
   padding: 4px;
 }
-
 QListWidget::item {
   padding: 8px 10px;
   margin: 3px 4px;
@@ -142,7 +120,6 @@ QListWidget::item:selected{
   border: none;
   border-radius: 8px;
 }
-
 /* Seleção mais suave dentro da sidebar */
 #SidePanel QListWidget::item:selected {
   background: {cond_selected};
@@ -150,10 +127,7 @@ QListWidget::item:selected{
   border-radius: 8px;
 }
 
-/* -------------------------
-   QComboBox (fechado)
-   (leve ajuste do drop-down)
-   ------------------------- */
+/* QComboBox (fechado) */
 QComboBox {
   background: {input_bg};
   color: {text};
@@ -171,7 +145,7 @@ QComboBox::drop-down {
   border-bottom-right-radius: 0;
 }
 
-/* ===== Popup do Combo (lista aberta) ===== */
+/* Popup do Combo (lista aberta) */
 QComboBox QAbstractItemView,
 QComboBox QAbstractItemView::viewport,
 QComboBox QListView,
@@ -181,37 +155,28 @@ QComboBox QTreeView::viewport {
   background: {surface};
   color: {text};
   border: 1px solid {box_border};
-
-  /* igual ao Combo: borda continua */
   border-top: none;
   border-top-left-radius: 0;
   border-top-right-radius: 0;
   border-bottom-left-radius: 10px;
   border-bottom-right-radius: 10px;
-
   margin-top: -1px;
   padding: 0;
 }
-
-/* Itens (sem contorno do foco) e com hover/seleção limpa */
 QComboBox QListView::item,
 QComboBox QTreeView::item {
   outline: 0;
   border: none;
-  padding: 6px 10px;      /* espaço interno dos itens */
-  border-radius: 6px;     /* arredonda o fundo do item (hover/selected) */
+  padding: 6px 10px;
+  border-radius: 6px;
 }
-
 QComboBox QListView::item:selected,
 QComboBox QTreeView::item:selected {
   background: {accent};
   color: {btn_text};
   border-radius: 6px;
 }
-
-QComboBox QAbstractItemView {
-  min-width: 100%;
-}
+QComboBox QAbstractItemView { min-width: 100%; }
 
 /* Scrollbar fininha no popup */
 QComboBox QScrollBar:vertical,
@@ -260,7 +225,7 @@ QPushButton:hover   { background: {btn_hover}; }
 QPushButton:pressed { background: {btn_hover}; }
 QPushButton:disabled { background: {input_bg}; color: {box_border}; }
 
-/* Primário / Secundário / Ghost / Chip */
+/* Variantes */
 QPushButton[variant="primary"]   { background: {accent}; color: {btn_text}; font-weight: 600; }
 QPushButton[variant="primary"]:hover { background: {hover}; }
 QPushButton[variant="secondary"] { background: transparent; color: {checkbox}; border: 1.4px solid {checkbox}; }
@@ -286,7 +251,7 @@ QCheckBox::indicator:checked, QRadioButton::indicator:checked {
 }
 
 /* =========================
-   SWITCH (fallback visual compacto)
+   SWITCH (compacto)
    ========================= */
 QCheckBox[switch="true"]::indicator {
   width: 30px; height: 18px; border-radius: 9px;
@@ -298,7 +263,6 @@ QCheckBox[switch="true"]::indicator:checked {
   background: {accent};
   border: 1px solid {accent};
 }
-
 QCheckBox[switch="true"]::indicator:checked:before,
 QCheckBox[switch="true"]::indicator:unchecked:before {
   content: '';
@@ -309,18 +273,18 @@ QCheckBox[switch="true"]::indicator:unchecked:before {
   top: 1px; left: 1px;
   transition: all 0.18s ease;
 }
-QCheckBox[switch="true"]::indicator:checked:before {
-  left: 13px;
-}
+QCheckBox[switch="true"]::indicator:checked:before { left: 13px; }
+
+/* ToggleSwitch (widget custom) */
 ToggleSwitch {
-  qproperty-offBg:    {bg_end};    /* fundo trilho inativo */
-  qproperty-offKnob:  {bg_start};  /* botão inativo */
-  qproperty-onBg:     {slider};    /* fundo trilho ativo */
-  qproperty-onKnob:   {checkbox};  /* botão ativo */
+  qproperty-offBg:    {bg_end};
+  qproperty-offKnob:  {bg_start};
+  qproperty-onBg:     {slider};
+  qproperty-onKnob:   {checkbox};
 }
 
 /* =========================
-   SLIDER / PROGRESS (mais fino e suave)
+   SLIDER / PROGRESS
    ========================= */
 QSlider::groove:horizontal {
   height: 6px; border-radius: 3px;
@@ -334,11 +298,11 @@ QSlider::handle:horizontal {
   background: {accent};
   width: 14px; height: 14px;
   border-radius: 7px;
-  margin: -4px 0;                /* deixa o “pino” centralizado no trilho */
+  margin: -4px 0;
   transition: all 120ms ease;
 }
 QSlider::handle:horizontal:hover {
-  width: 16px; height: 16px;     /* responde ao hover */
+  width: 16px; height: 16px;
   margin: -5px 0;
 }
 
@@ -375,7 +339,7 @@ QHeaderView::section {
 QScrollBar:vertical, QScrollBar:horizontal {
   background: {surface};
   border: 0;
-  width: 8px; height: 8px;        /* mais finas */
+  width: 8px; height: 8px;
   margin: 0;
 }
 QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
@@ -403,73 +367,79 @@ QToolTip {
 /* =========================
    LOADING OVERLAY
    ========================= */
-QWidget#LoadingOverlay {
-  background: transparent;         /* overlay transparente (bloqueia só por estar em cima) */
-}
-
+QWidget#LoadingOverlay { background: transparent; }
 QFrame#LoadingPanel {
-  /* painel central: mesma cor do 'slider' com ~20% de opacidade */
   background: {loading_overlay_bg};
   border: 1px solid {box_border};
   border-radius: 12px;
 }
+QFrame#LoadingPanel QLabel { color: {btn_text}; }
 
-QFrame#LoadingPanel QLabel {
-  color: {btn_text};               /* texto visível sobre o overlay */
-}
-
-/* Sidebar de settings: escura/transparente e com CANTO SUP ESQUERDO arredondado */
+/* =========================
+   SETTINGS SIDEBAR (custom)
+   ========================= */
 #SettingsSidePanel {
-    background: rgba(0, 0, 0, 0.35);
-    border-left: 1px solid palette(mid);
-    border-top-left-radius: 10px;     /* <-- só este canto */
+  background: rgba(0, 0, 0, 0.35);
+  border-left: 1px solid palette(mid);
+  border-top-left-radius: 10px;
 }
 #SettingsSidePanelHeader {
-    background: rgba(0, 0, 0, 0.18);
-    border-bottom: 1px solid palette(mid);
-    border-top-left-radius: 10px;     /* acompanha o painel */
+  background: rgba(0, 0, 0, 0.18);
+  border-bottom: 1px solid palette(mid);
+  border-top-left-radius: 10px;
 }
 
-/* Botão da engrenagem na titlebar: sem fundo, contorno, reage ao tema */
+/* Botão da engrenagem na titlebar */
 #TitlebarSettingsButton {
-    border: 1px solid palette(mid);
-    background: transparent;
-    color: palette(window-text);
-    padding: 3px 7px;
-    border-radius: 6px;
+  border: 1px solid palette(mid);
+  background: transparent;
+  color: palette(window-text);
+  padding: 3px 7px;
+  border-radius: 6px;
 }
-#TitlebarSettingsButton:hover {
-    border-color: palette(highlight);
-    background: rgba(255,255,255,0.06);
-}
-#TitlebarSettingsButton:pressed {
-    background: rgba(255,255,255,0.12);
-}
+#TitlebarSettingsButton:hover  { border-color: palette(highlight); background: rgba(255,255,255,0.06); }
+#TitlebarSettingsButton:pressed{ background: rgba(255,255,255,0.12); }
 
 /* Botão de 3 pontinhos (depois da combo) */
 #TinyMenuButton {
-    border: 1px solid palette(mid);
-    background: transparent;
-    color: palette(window-text);
-    padding: 0;
-    border-radius: 6px;
+  background: {surface};
+  color: {text};
+  border: 1px solid {box_border};
+  border-radius: 6px;
+  padding: 0 6px;
 }
-#TinyMenuButton:hover   { border-color: palette(highlight); }
-#TinyMenuButton:pressed { background: rgba(255,255,255,0.12); }
-#TinyMenuButton::menu-indicator { image: none; }  /* remove setinha padrão */
+#TinyMenuButton:hover   { background: {cond_selected}; }
+#TinyMenuButton:pressed { background: rgba(255,255,255,0.08); }
+#TinyMenuButton::menu-indicator { image: none; }
 
 /* Menu das opções */
 QMenu {
-    background: palette(base);
-    border: 1px solid palette(mid);
-    border-radius: 8px;
-    padding: 6px 0;
+  background: {surface};
+  color: {text};
+  border: 1px solid {box_border};
+  border-radius: 8px;
+  padding: 4px;
 }
 QMenu::item {
-    padding: 6px 14px;
-    border-radius: 0;
+  padding: 6px 12px;
+  border-radius: 6px;
 }
 QMenu::item:selected {
-    background: palette(highlight);
-    color: palette(highlighted-text);
+  background: {cond_selected};
+  color: {text};
+}
+
+/* === Theme Editor Preview (contorno/título do preview) === */
+#pvWrap {
+  background: transparent;
+  border: 3px solid {box_border};
+  border-radius: 12px;
+}
+#pvWrapTitle {
+  color: {text};
+  font-weight: 700;
+  padding: 2px 10px;
+  background: {surface};
+  border: 1px solid {box_border};
+  border-radius: 6px;
 }

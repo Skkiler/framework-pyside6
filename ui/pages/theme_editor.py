@@ -1,78 +1,68 @@
 # ui/pages/theme_editor.py
 
 from __future__ import annotations
-from functools import partial
 from typing import Dict, Optional, Tuple
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QPushButton,
-    QWidget, QColorDialog, QLabel, QFrame, QGridLayout, QLineEdit, QListWidget
+    QVBoxLayout, QHBoxLayout, QPushButton, QWidget, QColorDialog,
+    QLabel, QFrame, QGridLayout, QLineEdit, QListWidget, QScrollArea,
+    QSizePolicy
 )
+from PySide6.QtGui import QColor
 
-# === MODELO PADRÃO (apenas VARS) ===
-# Cobrem os tokens usados pelo base.qss (e nossos QSSs “ricos”)
+from ..core.frameless_window import FramelessDialog
+from ..widgets.titlebar import TitleBar
+
+from ..services.qss_renderer import load_base_qss, render_qss_from_base
+import app.settings as cfg
+
+# === Tokens padrão ===
 DEFAULT_VARS: Dict[str, str] = {
-    # Fundo
     "bg_start": "#2f2f2f",
-    "bg_end":   "#3f3f3f",
-    "bg":       "#2f2f2f",
-    "surface":  "#383838",
-
-    # Texto
-    "text":       "#e5e5e5",
+    "bg_end": "#3f3f3f",
+    "bg": "#2f2f2f",
+    "surface": "#383838",
+    "text": "#e5e5e5",
     "text_hover": "#ffffff",
-
-    # Botões / Acento
-    "btn":       "#3f7ad1",
+    "btn": "#3f7ad1",
     "btn_hover": "#347de9",
-    "btn_text":  "#ffffff",
-    "hover":     "#347de9",
-    "accent":    "#347de9",   # usado em seleção, títulos, etc.
-
-    # Inputs & Borda
-    "input_bg":    "#141111",
-    "box_border":  "#666666",
-
-    # Controles
+    "btn_text": "#ffffff",
+    "hover": "#347de9",
+    "accent": "#347de9",
+    "input_bg": "#141111",
+    "box_border": "#666666",
     "checkbox": "#e11717",
-    "slider":   "#e11717",
-
-    # Seleção
+    "slider": "#e11717",
     "cond_selected": "#505050",
-
-    # Paleta/compat
     "window_bg": "#2f2f2f",
 }
 
-# === GRUPOS (ordem & rótulos) ===
-# Apenas campos de vars (o editor salva sempre { "vars": {...} })
 GROUPS: Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...] = (
     ("Fundo", (
         ("Gradiente início", "bg_start"),
-        ("Gradiente fim",    "bg_end"),
-        ("Plano de fundo",   "bg"),
+        ("Gradiente fim", "bg_end"),
+        ("Plano de fundo", "bg"),
         ("Superfície (cards/menus)", "surface"),
     )),
     ("Texto", (
-        ("Texto",        "text"),
-        ("Texto (hover)","text_hover"),
+        ("Texto", "text"),
+        ("Texto (hover)", "text_hover"),
     )),
     ("Botões / Acento", (
-        ("Botão",         "btn"),
+        ("Botão", "btn"),
         ("Botão (hover)", "btn_hover"),
-        ("Texto do botão","btn_text"),
+        ("Texto do botão", "btn_text"),
         ("Cor de foco/hover global", "hover"),
         ("Acento (seleções/destaques)", "accent"),
     )),
     ("Entradas", (
         ("Fundo de entradas", "input_bg"),
-        ("Bordas/contorno",   "box_border"),
+        ("Bordas/contorno", "box_border"),
     )),
     ("Controles", (
         ("Checkbox / Radio", "checkbox"),
-        ("Slider (barra)",   "slider"),
+        ("Slider (barra)", "slider"),
     )),
     ("Seleção", (
         ("Linha/Item selecionado", "cond_selected"),
@@ -82,53 +72,43 @@ GROUPS: Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...] = (
     )),
 )
 
-#-------------------------- Helpers ----------------------
-
-def _clamp(x: float) -> int:
-    return max(0, min(255, int(round(x))))
-
-def _parse_hex(s: str) -> tuple[int, int, int, int]:
-    s = s.strip()
-    if not s.startswith("#"): return (47,47,47,255)
-    s = s[1:]
-    if len(s) == 3:
-        r,g,b = (int(s[0]*2,16), int(s[1]*2,16), int(s[2]*2,16))
-        return (r,g,b,255)
-    if len(s) == 6:
-        return (int(s[0:2],16), int(s[2:4],16), int(s[4:6],16), 255)
-    if len(s) == 8:
-        a = int(s[0:2],16)
-        return (int(s[2:4],16), int(s[4:6],16), int(s[6:8],16), a)
-    return (47,47,47,255)
-
 def _darken_hex(hex_color: str, factor: float) -> str:
-    """factor < 1.0 escurece (ex.: 0.8 = 20% mais escuro)"""
-    r,g,b,a = _parse_hex(hex_color)
-    r = _clamp(r*factor); g = _clamp(g*factor); b = _clamp(b*factor)
-    return f"#{r:02X}{g:02X}{b:02X}" if a==255 else f"#{a:02X}{r:02X}{g:02X}{b:02X}"
+    h = hex_color.lstrip("#")
+    r = int(h[0:2], 16); g = int(h[2:4], 16); b = int(h[4:6], 16)
+    clamp = lambda x: max(0, min(255, int(round(x*factor))))
+    return f"#{clamp(r):02X}{clamp(g):02X}{clamp(b):02X}"
 
+def _scope_qss(qss: str, scope_id: str = "ThemePreview") -> str:
+    """Prefixa cada seletor com #ThemePreview para isolar o estilo no preview."""
+    out = []
+    for line in qss.splitlines():
+        s = line.strip()
+        if s.startswith(("/*","@")) or "{" not in line:
+            out.append(line); continue
+        left, right = line.split("{", 1)
+        out.append(f"#{scope_id} {left.strip()}{{{right}")
+    return "\n".join(out)
 
-#-------------------------- Editor ----------------------
 
 class SwatchButton(QPushButton):
-    """Botão pequeno com pré-visualização da cor + hex como tooltip."""
+    """Amostra de cor em formato CÍRCULO; clique abre QColorDialog."""
     def __init__(self, key: str, color_hex: str, on_pick, parent=None):
         super().__init__(parent)
-        self.key = key
-        self._on_pick = on_pick
-        self.setFixedSize(40, 24)
+        self.key = key; self._on_pick = on_pick
+        self._size = 18  # diâmetro
+        self.setFixedSize(self._size, self._size)
         self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip(f"{key}: {color_hex}")
-        self._apply_color(color_hex)
+        sp = self.sizePolicy()
+        sp.setHorizontalPolicy(QSizePolicy.Fixed); sp.setVerticalPolicy(QSizePolicy.Fixed)
+        self.setSizePolicy(sp)
+        self._apply(color_hex)
         self.clicked.connect(self._choose)
 
-    def _apply_color(self, color_hex: str):
+    def _apply(self, color_hex: str):
+        radius = int(self._size/2)
         self.setStyleSheet(
-            "QPushButton {"
-            f"background: {color_hex};"
-            "border: 1px solid rgba(0,0,0,0.35);"
-            "border-radius: 6px;"
-            "}"
+            f"QPushButton{{background:{color_hex};"
+            f"border:1px solid rgba(0,0,0,.35);border-radius:{radius}px;}}"
         )
         self.setToolTip(f"{self.key}: {color_hex}")
 
@@ -136,264 +116,300 @@ class SwatchButton(QPushButton):
         initial = QColor(self.toolTip().split(":")[-1].strip())
         col = QColorDialog.getColor(initial, self, f"Escolher cor para {self.key}")
         if col.isValid():
-            self._on_pick(self.key, col.name())
-            self._apply_color(col.name())
+            self._on_pick(self.key, col.name()); self._apply(col.name())
 
 
-class ThemeEditorDialog(QDialog):
-
+# ========================= D I A L O G =========================
+class ThemeEditorDialog(FramelessDialog):
     def __init__(self, name: str, props: Optional[Dict[str, str] | Dict[str, Dict[str, str]]], parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"Editar Tema: {name}")
-        self.setMinimumWidth(680)
+        self.set_center_mode("window"); self.setMinimumWidth(720)
         self.theme_name = name
 
-        # Normaliza entrada: aceitar {"vars": {...}} ou dict simples de tokens
-        incoming_vars = {}
+        incoming = {}
         if isinstance(props, dict):
-            if "vars" in props and isinstance(props["vars"], dict):
-                incoming_vars = {k: v for k, v in props["vars"].items() if isinstance(v, str) and v.startswith("#")}
-            else:
-                incoming_vars = {k: v for k, v in props.items() if isinstance(v, str) and v.startswith("#")}
+            incoming = props.get("vars", props)
+        incoming = {k: v for k, v in incoming.items() if isinstance(v, str) and v.startswith("#")}
+        self.vars: Dict[str, str] = {**DEFAULT_VARS, **incoming}
 
-        self.vars: Dict[str, str] = dict(DEFAULT_VARS)
-        self.vars.update(incoming_vars)  # prioridade para valores do tema
+        root = QWidget(self)
+        v = QVBoxLayout(root); v.setContentsMargins(12,12,12,12); v.setSpacing(10)
 
-        self._swatches: Dict[str, SwatchButton] = {}
+        tb = TitleBar(f"Editar Tema: {name}", root)
+        self.connect_titlebar(tb); v.addWidget(tb)
+        v.addWidget(self._build_body(root), 1)
 
-        self._build_ui()
-        self._refresh_preview()
+        actions = QHBoxLayout(); actions.addStretch(1)
+        btn_reset = QPushButton("Restaurar padrão"); btn_reset.clicked.connect(self._reset_defaults)
+        btn_ok = QPushButton("Salvar"); btn_ok.clicked.connect(self.accept)
+        btn_cancel = QPushButton("Cancelar"); btn_cancel.clicked.connect(self.reject)
+        actions.addWidget(btn_reset); actions.addWidget(btn_ok); actions.addWidget(btn_cancel)
+        v.addLayout(actions)
 
-    # ---------- UI ----------
-    def _build_ui(self):
-        root = QVBoxLayout(self)
-        root.setContentsMargins(12, 12, 12, 12)
-        root.setSpacing(10)
+        self.setCentralWidget(root)
 
-        # Cabeçalho
-        header = QLabel("Ajuste as cores do tema. Clique nos quadradinhos para escolher as cores.")
-        header.setStyleSheet("font-weight:600; margin-bottom:6px;")
-        root.addWidget(header)
+        # ===== PERF: cache e debounce =====
+        self._base_qss = load_base_qss(str(cfg.BASE_QSS))
+        self._last_qss_applied: str = ""
 
-        # Conteúdo em 2 colunas: (esquerda = editores) | (direita = preview)
-        row = QHBoxLayout()
-        row.setSpacing(12)
-        root.addLayout(row)
+        self._qssUpdateTimer = QTimer(self)
+        self._qssUpdateTimer.setSingleShot(True)
+        self._qssUpdateTimer.timeout.connect(self._apply_preview_qss)
 
-        # Esquerda: grupos com swatches
-        left = QWidget(self)
-        left_l = QVBoxLayout(left); left_l.setContentsMargins(0,0,0,0); left_l.setSpacing(8)
+        self._chrome_tokens = self._derive_tokens()
+        self._apply_editor_chrome(self._chrome_tokens)
+
+        self._apply_preview_qss()
+
+        self.resize(980, 680)
+        QTimer.singleShot(0, self._center_over_parent)
+
+    def _build_body(self, parent: QWidget) -> QWidget:
+        w = QWidget(parent)
+        row = QHBoxLayout(w); row.setSpacing(12); row.setContentsMargins(0,0,0,0)
+
+        # === Esquerda: WRAP com contorno + Scroll ===
+        left_wrap = QFrame(w)
+        left_wrap.setObjectName("EditorPane")           # frame com contorno
+        left_wrap_l = QVBoxLayout(left_wrap)
+        left_wrap_l.setContentsMargins(10, 10, 10, 10)  # igual à preview
+        left_wrap_l.setSpacing(0)
+
+        left_scroll = QScrollArea(left_wrap)
+        left_scroll.setObjectName("EditorScroll")
+        left_scroll.setFrameShape(QFrame.NoFrame)
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        left_scroll.viewport().setAutoFillBackground(False)
+        left_wrap_l.addWidget(left_scroll)
+
+        left = QWidget(); left.setObjectName("EditorLeft")
+        left_scroll.setWidget(left)
+
+        left_l = QVBoxLayout(left); left_l.setContentsMargins(0,0,0,0); left_l.setSpacing(6)
 
         for group_title, items in GROUPS:
-            box = QFrame(left); box.setFrameShape(QFrame.StyledPanel); box.setObjectName("groupBox")
-            gl = QGridLayout(box); gl.setContentsMargins(10,8,10,10); gl.setHorizontalSpacing(8); gl.setVerticalSpacing(6)
+            box = QFrame(left); box.setObjectName("groupBox")
+            gl = QGridLayout(box)
+            gl.setContentsMargins(8,6,8,6); gl.setHorizontalSpacing(6); gl.setVerticalSpacing(4)
 
-            title = QLabel(group_title); title.setStyleSheet("font-weight:600;")
-            gl.addWidget(title, 0, 0, 1, 2)
+            title_lbl = QLabel(group_title)
+            f = title_lbl.font(); f.setPointSizeF(max(9.0, f.pointSizeF()-1)); title_lbl.setFont(f)
+            gl.addWidget(title_lbl, 0, 0, 1, 2)
 
-            row_i = 1
+            r = 1
             for label, key in items:
-                lab = QLabel(label + ":")
-                sw = SwatchButton(key, self.vars.get(key, DEFAULT_VARS.get(key, "#ffffff")), self._on_pick, box)
-                self._swatches[key] = sw
-                gl.addWidget(lab, row_i, 0)
-                gl.addWidget(sw,  row_i, 1)
-                row_i += 1
+                lbl = QLabel(label + ":")
+                lf = lbl.font(); lf.setPointSizeF(max(9.0, lf.pointSizeF()-1)); lbl.setFont(lf)
+                lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                gl.addWidget(lbl, r, 0)
+
+                sw = SwatchButton(key, self.vars.get(key, DEFAULT_VARS[key]), self._on_pick, box)
+                gl.addWidget(sw, r, 1, alignment=Qt.AlignRight | Qt.AlignVCenter)
+                r += 1
 
             left_l.addWidget(box)
-
         left_l.addStretch(1)
-        row.addWidget(left, 0)
 
-        # Direita: Preview dentro de um WRAP com título e borda grossa
-        pv_wrap = QFrame(self)
-        pv_wrap.setObjectName("pvWrap")
-        pvw_l = QVBoxLayout(pv_wrap)
-        pvw_l.setContentsMargins(12, 10, 12, 12)
-        pvw_l.setSpacing(6)
+        # refs para estilizar com tokens
+        self._left_wrap = left_wrap
+        self._left_scroll = left_scroll
+        self._left_root = left
 
-        pv_title = QLabel("Pré-visualização")
-        pv_title.setObjectName("pvWrapTitle")
-        pvw_l.addWidget(pv_title, 0, Qt.AlignLeft)
+        # === Preview (maior): 1:2 ≈ 33/66 ===
+        row.addWidget(left_wrap, 0)
 
-        self.preview = self._build_preview_widget(pv_wrap)
-        pvw_l.addWidget(self.preview, 1)
-
+        # pv_wrap (contorno da área de preview)
+        pv_wrap = QFrame(w); pv_wrap.setObjectName("pvWrap")
         row.addWidget(pv_wrap, 1)
+        row.setStretch(0, 1)
+        row.setStretch(1, 2)
 
-        # Rodapé: ações
-        actions = QHBoxLayout(); actions.addStretch(1)
-        reset = QPushButton("Restaurar padrão"); reset.clicked.connect(self._reset_defaults)
-        ok = QPushButton("Salvar"); ok.clicked.connect(self.accept)
-        cancel = QPushButton("Cancelar"); cancel.clicked.connect(self.reject)
-        actions.addWidget(reset); actions.addWidget(ok); actions.addWidget(cancel)
-        root.addLayout(actions)
+        pvw = QVBoxLayout(pv_wrap); pvw.setContentsMargins(12,10,12,12); pvw.setSpacing(6)
+        t = QLabel("Pré-visualização"); t.setObjectName("pvWrapTitle")
+        pvw.addWidget(t, 0, Qt.AlignLeft)
 
-        # Estilinho leve do editor (lado esquerdo)
-        self.setStyleSheet("""
-        QFrame#groupBox {
-            background: rgba(0,0,0,0.05);
-            border: 1px solid rgba(0,0,0,0.15);
-            border-radius: 8px;
-        }
-        """)
+        # Raiz de escopo do preview
+        self.preview_root = QWidget(pv_wrap); self.preview_root.setObjectName("ThemePreview")
+        pvw.addWidget(self.preview_root, 1)
+        scope_l = QVBoxLayout(self.preview_root); scope_l.setContentsMargins(0,0,0,0); scope_l.setSpacing(0)
 
-    def _build_preview_widget(self, parent: QWidget) -> QWidget:
+        # Estrutura EXATA esperada pelo base.qss:
+        # #FramelessFrame -> #FramelessContent
+        frame = QFrame(self.preview_root); frame.setObjectName("FramelessFrame")
+        frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        scope_l.addWidget(frame, 1)
 
-        w = QWidget(parent)
-        w.setObjectName("previewRoot")
-        lay = QHBoxLayout(w); lay.setContentsMargins(0,0,0,0); lay.setSpacing(0)
+        frame_l = QVBoxLayout(frame); frame_l.setContentsMargins(1, 1, 1, 1); frame_l.setSpacing(0)
+        content = QWidget(frame); content.setObjectName("FramelessContent")
+        frame_l.addWidget(content, 1)
 
-        # Sidebar fake
-        side = QFrame(w); side.setObjectName("pvSide"); side.setFixedWidth(180)
-        side_l = QVBoxLayout(side); side_l.setContentsMargins(10,10,10,10); side_l.setSpacing(6)
-        side_title = QLabel("Menu"); side_title.setObjectName("pvSideTitle")
+        # Dentro do conteúdo: sidebar + content (como seu app)
+        pl = QHBoxLayout(content); pl.setContentsMargins(0,0,0,0); pl.setSpacing(0)
+
+        side = QFrame(content); side.setObjectName("pvSide"); side.setFixedWidth(180)
+        sl = QVBoxLayout(side); sl.setContentsMargins(10,10,10,10); sl.setSpacing(6)
+        st = QLabel("Menu"); st.setObjectName("pvSideTitle")
         lst = QListWidget(side); lst.addItems(["Início", "Relatórios", "Configurações"])
-        side_l.addWidget(side_title); side_l.addWidget(lst, 1)
+        sl.addWidget(st); sl.addWidget(lst, 1)
 
-        # Conteúdo
-        content = QFrame(w); content.setObjectName("pvContent")
-        cl = QVBoxLayout(content); cl.setContentsMargins(12,12,12,12); cl.setSpacing(8)
-
+        main = QFrame(content); main.setObjectName("pvContent")
+        cl = QVBoxLayout(main); cl.setContentsMargins(12,12,12,12); cl.setSpacing(8)
         title = QLabel("Pré-visualização"); title.setObjectName("pvTitle")
-
-        card = QFrame(content)
-        card.setObjectName("OuterPanel")
-        
+        card = QFrame(main); card.setObjectName("OuterPanel")
         card_l = QVBoxLayout(card); card_l.setContentsMargins(12,12,12,12); card_l.setSpacing(8)
-
-        # Input + Botões
-        row = QHBoxLayout(); row.setSpacing(8)
+        row2 = QHBoxLayout(); row2.setSpacing(8)
         inp = QLineEdit(card); inp.setPlaceholderText("Exemplo de input…")
-        btn_ok = QPushButton("Ação"); btn_cancel = QPushButton("Cancelar")
-        row.addWidget(inp, 1); row.addWidget(btn_ok); row.addWidget(btn_cancel)
-
-        card_l.addLayout(row)
+        btn1 = QPushButton("Ação"); btn2 = QPushButton("Primário"); btn2.setProperty("variant", "primary")
+        row2.addWidget(inp, 1); row2.addWidget(btn1); row2.addWidget(btn2)
+        card_l.addLayout(row2)
         cl.addWidget(title); cl.addWidget(card, 1)
 
-        lay.addWidget(side); lay.addWidget(content, 1)
-
-        self._pv_refs = {
-            "root": w, "side": side, "side_title": side_title, "list": lst,
-            "content": content, "title": title, "card": card, "input": inp,
-            "btn_ok": btn_ok, "btn_cancel": btn_cancel
-        }
+        pl.addWidget(side); pl.addWidget(main, 1)
         return w
 
-    # ---------- Ações ----------
+    # ---- tokens ----
+    def _derive_tokens(self) -> Dict[str, str]:
+
+        t = dict(self.vars)
+
+        # 1) Derivar gradiente do 'bg' se o usuário NÃO personalizou bg_start/bg_end
+        bg = t.get("bg", DEFAULT_VARS["bg"])
+        user_kept_defaults = (
+            t.get("bg_start", DEFAULT_VARS["bg_start"]) == DEFAULT_VARS["bg_start"]
+            and t.get("bg_end",   DEFAULT_VARS["bg_end"])   == DEFAULT_VARS["bg_end"]
+        )
+        if user_kept_defaults:
+            t["bg_start"] = _darken_hex(bg, 0.95)
+            t["bg_end"]   = _darken_hex(bg, 0.80)
+
+        # 2) content_bg: usado em painéis / TopBar
+        t["content_bg"] = t.get("surface", DEFAULT_VARS["surface"])
+
+        # 3) loading_overlay_bg translúcido a partir do accent (fallbacks)
+        def _rgba(hex_color: str, alpha: float) -> str:
+            h = hex_color.lstrip("#")
+            r = int(h[0:2], 16); g = int(h[2:4], 16); b = int(h[4:6], 16)
+            a = max(0.0, min(1.0, alpha))
+            return f"rgba({r},{g},{b},{a:.3f})"
+
+        base_for_overlay = t.get("accent") or t.get("slider") or DEFAULT_VARS["accent"]
+        t["loading_overlay_bg"] = _rgba(base_for_overlay, 0.25)
+
+        return t
+
+    # Estiliza o painel esquerdo (fora do preview) com surface/text/slider/box_border
+    def _apply_editor_chrome(self, tokens: Dict[str, str]):
+        if not all(hasattr(self, x) for x in ("_left_root", "_left_scroll", "_left_wrap")):
+            return
+        surface = tokens.get("surface", "#383838")
+        text = tokens.get("text", "#e5e5e5")
+        slider = tokens.get("slider", "#e11717")
+        border = tokens.get("box_border", "#666666")
+
+        # Contorno e fundo do painel
+        self._left_wrap.setStyleSheet(
+            f"""
+            QFrame#EditorPane {{
+                background: {surface};
+                border: 1px solid {border};
+                border-radius: 10px;
+            }}
+            """
+        )
+
+        # Fundo do conteúdo = surface; filhos transparentes herdam o fundo
+        self._left_root.setStyleSheet(
+            f"""
+            QWidget#EditorLeft {{
+                background: {surface};
+                color: {text};
+            }}
+            QWidget#EditorLeft * {{
+                color: {text};
+                background: transparent;
+            }}
+            QFrame#groupBox {{
+                background: transparent;
+                border: none;
+            }}
+            """
+        )
+
+        # Scrollbar fina + transparências no scroll/viewport
+        self._left_scroll.setStyleSheet(
+            f"""
+            QScrollArea#EditorScroll {{
+                background: transparent;
+            }}
+            QScrollArea#EditorScroll > QWidget {{
+                background: transparent;
+            }}
+            QScrollArea#EditorScroll > QWidget > QWidget {{
+                background: transparent;
+            }}
+            QScrollBar:vertical {{
+                width: 6px;
+                margin: 0;
+                background: transparent;
+            }}
+            QScrollBar::handle:vertical {{
+                min-height: 20px;
+                border-radius: 3px;
+                background: {slider};
+                border: 1px solid {border};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+            """
+        )
+
+    # ---- aplica QSS na preview com cache/compare ----
+    def _apply_preview_qss(self):
+        tokens = self._derive_tokens()
+
+        base_rendered = render_qss_from_base(self._base_qss, tokens)
+        scoped_qss = _scope_qss(base_rendered, "ThemePreview")
+        scoped_qss += (
+            f"\n#ThemePreview QFrame#OuterPanel "
+            f"{{ background: {tokens.get('surface', DEFAULT_VARS['surface'])}; }}"
+        )
+
+        if scoped_qss == self._last_qss_applied:
+            return
+
+        self.preview_root.setUpdatesEnabled(False)
+        try:
+            st = self.preview_root.style()
+            st.unpolish(self.preview_root)
+            self.preview_root.setStyleSheet(scoped_qss)
+            st.polish(self.preview_root)
+            self._last_qss_applied = scoped_qss
+        finally:
+            self.preview_root.setUpdatesEnabled(True)
+            self.preview_root.update()
+
+    # debounce ~60 fps
+    def _schedule_qss_update(self, delay_ms: int = 16):
+        if self._qssUpdateTimer.isActive():
+            self._qssUpdateTimer.stop()
+        self._qssUpdateTimer.start(delay_ms)
+
+    # slots
     def _reset_defaults(self):
         self.vars = dict(DEFAULT_VARS)
-        # atualiza swatches
-        for k, sw in self._swatches.items():
-            col = self.vars.get(k, DEFAULT_VARS.get(k, "#ffffff"))
-            sw._apply_color(col)
-        self._refresh_preview()
+        self._schedule_qss_update()
 
     def _on_pick(self, key: str, color_hex: str):
         self.vars[key] = color_hex
-        self._refresh_preview()
+        self._schedule_qss_update()
 
-    # ---------- Preview ----------
-    def _refresh_preview(self):
-        th = self.vars
-
-        # Fundo do preview (gradiente)
-        grad = (
-            "qlineargradient(x1:0,y1:0,x2:0,y2:1, "
-            f"stop:0 {th.get('bg_start', DEFAULT_VARS['bg_start'])}, "
-            f"stop:1 {th.get('bg_end',   DEFAULT_VARS['bg_end'])})"
-        )
-
-        # Mesmo derivado que o app usa: content_bg = bg_start 20% mais escuro
-        bg0 = th.get('bg_start', DEFAULT_VARS['bg_start'])
-        content_bg = _darken_hex(bg0, 0.8)
-
-        qss = f"""
-        /* ===== Moldura do preview ===== */
-        QFrame#pvWrap {{
-            background: transparent;
-            border: 3px solid {th.get('box_border')};
-            border-radius: 12px;
-        }}
-        QLabel#pvWrapTitle {{
-            color: {th.get('text')};
-            font-weight: 700;
-            padding: 2px 10px;
-            background: {th.get('surface')};
-            border: 1px solid {th.get('box_border')};
-            border-radius: 6px;
-        }}
-
-        /* ===== Área real do preview ===== */
-        QWidget#previewRoot {{
-            background: {grad};
-            border: 1px solid {th.get('box_border')};
-            border-radius: 10px;
-        }}
-
-        /* Sidebar dentro do preview como caixa externa sólida */
-        QFrame#pvSide {{
-            background: {content_bg};
-            border-right: 1px solid {th.get('box_border')};
-        }}
-        QLabel#pvSideTitle {{
-            color: {th.get('text')};
-            font-weight: 600;
-            margin-left: 2px;
-        }}
-
-        QListWidget {{
-            background: {th.get('surface')};
-            border: 1px solid {th.get('box_border')};
-            border-radius: 6px;
-            color: {th.get('text')};
-        }}
-        QListWidget::item {{ padding: 8px 10px; }}
-        QListWidget::item:selected {{
-            background: {th.get('accent')};
-            color: {th.get('text')};
-        }}
-
-        QFrame#pvContent {{ background: transparent; }}
-        QLabel#pvTitle   {{ color: {th.get('text')}; font-weight: 600; }}
-
-        /* Card do conteúdo = caixa externa sólida */
-        QFrame#pvCard, QFrame#OuterPanel {{
-            background: {content_bg};
-            border: 1px solid {th.get('box_border')};
-            border-radius: 8px;
-        }}
-
-        QLineEdit {{
-            background: {th.get('input_bg')};
-            color: {th.get('text')};
-            border: 1px solid {th.get('box_border')};
-            border-radius: 6px;
-            padding: 4px 8px;
-        }}
-        QPushButton {{
-            background: {th.get('btn')};
-            color: {th.get('btn_text')};
-            border: none;
-            border-radius: 7px;
-            padding: 6px 12px;
-        }}
-        QPushButton:hover {{
-            background: {th.get('btn_hover')};
-            color: {th.get('btn_text')};
-        }}
-        """
-        self.preview.setStyleSheet(qss)
-
-    # ---------- API ----------
+    # API pública
     def get_theme_data(self) -> Dict[str, Dict[str, str]]:
-        """Retorna no padrão final esperado: {"vars": {...}}"""
-        # Garante todas as chaves essenciais
         out = dict(DEFAULT_VARS)
         out.update({k: v for k, v in self.vars.items() if isinstance(v, str) and v.startswith("#")})
         return {"vars": out}
 
-    # Compatibilidade com códigos antigos que esperavam dlg.props (apenas vars)
     @property
     def props(self) -> Dict[str, str]:
         out = dict(DEFAULT_VARS)

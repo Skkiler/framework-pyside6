@@ -8,6 +8,7 @@ from .buttons import Controls
 
 EXPANDED_WIDTH = 320  # largura da sidebar direita
 
+
 class SettingsSidePanel(QFrame):
     opened = Signal()
     closed = Signal()
@@ -71,14 +72,25 @@ class SettingsSidePanel(QFrame):
 
     # --- helpers ---
     def _full_rect(self) -> QRect:
+        """
+        Retorna apenas a área útil do conteúdo: toda a área do parent
+        menos a altura da TitleBar (se existir e estiver visível).
+        """
         p = self.parentWidget()
-        return QRect(0, 0, p.width(), p.height()) if p else QRect()
+        if not p:
+            return QRect()
+        top = 0
+        tb = p.findChild(QWidget, "TitleBar")
+        if tb and tb.isVisible():
+            top = tb.height()
+        return QRect(0, top, p.width(), max(0, p.height() - top))
 
     def eventFilter(self, obj, e):
         if obj is self.parentWidget() and e.type() == QEvent.Resize:
             if self._expanded:
                 fr = self._full_rect()
-                self.setGeometry(QRect(fr.width() - EXPANDED_WIDTH, 0, EXPANDED_WIDTH, fr.height()))
+                self.setGeometry(QRect(fr.width() - EXPANDED_WIDTH, fr.y(),
+                                       EXPANDED_WIDTH, fr.height()))
                 if self._scrim:
                     self._scrim.setGeometry(fr)
         return super().eventFilter(obj, e)
@@ -97,8 +109,8 @@ class SettingsSidePanel(QFrame):
         self.raise_()
 
         fr = self._full_rect()
-        start = QRect(fr.width(), 0, EXPANDED_WIDTH, fr.height())
-        end   = QRect(fr.width() - EXPANDED_WIDTH, 0, EXPANDED_WIDTH, fr.height())
+        start = QRect(fr.right(), fr.y(), EXPANDED_WIDTH, fr.height())
+        end   = QRect(fr.right() - EXPANDED_WIDTH, fr.y(), EXPANDED_WIDTH, fr.height())
 
         if animate:
             self._anim.stop()
@@ -116,8 +128,8 @@ class SettingsSidePanel(QFrame):
         self._expanded, self._in_anim = False, True
 
         fr = self._full_rect()
-        start = QRect(self.geometry().x(), 0, EXPANDED_WIDTH, fr.height())
-        end   = QRect(fr.width(), 0, EXPANDED_WIDTH, fr.height())
+        start = QRect(self.geometry().x(), fr.y(), EXPANDED_WIDTH, fr.height())
+        end   = QRect(fr.right(),            fr.y(), EXPANDED_WIDTH, fr.height())
 
         def _after():
             self.hide()

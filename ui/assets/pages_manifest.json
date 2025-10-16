@@ -1,2 +1,9 @@
-    [
-      {"module": "ui.pages.home_page", "factory": "build", "route": "home", "label": "Início", "sidebar": true, "order": 1}    ]
+[
+  {
+    "route": "Home",
+    "label": "Ínicio",
+    "sidebar": true,
+    "order": 0,
+    "factory": "ui.pages.home_page:build"
+  }
+]

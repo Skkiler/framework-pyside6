@@ -3,21 +3,27 @@
 from __future__ import annotations
 
 import importlib
-import inspect
+import json
 import pkgutil
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Any, Dict, Tuple
+from pathlib import Path
+from typing import Any, Callable, List, Optional, Union
 
 from PySide6.QtWidgets import QWidget
-try:
-    # disponível no Py3.8+
-    from typing import Protocol  # type: ignore
-except Exception:  # pragma: no cover
-    class Protocol:  # fallback bobo
-        pass
 
+# ============================================================
+#  Normalização de rotas
+# ============================================================
 
-@dataclass
+def _normalize_route(route: str) -> str:
+    # normaliza rota para deduplicação e navegação estáveis
+    return (route or "").strip().replace("\\", "/").replace(" ", "-").lower()
+
+# ============================================================
+#  Data Model
+# ============================================================
+
+@dataclass(frozen=True)
 class PageSpec:
     route: str
     label: str
@@ -25,170 +31,293 @@ class PageSpec:
     order: int
     factory: Callable[..., QWidget]
 
+    def is_valid(self) -> bool:
+        return bool(self.route and callable(self.factory))
 
-# ---------- helpers seguros ----------
 
-def _is_protocol(cls: Any) -> bool:
-    """True se for typing.Protocol (ou derivado)."""
-    try:
-        return inspect.isclass(cls) and issubclass(cls, Protocol)
-    except Exception:
-        return False
+# ============================================================
+#  Helpers internos
+# ============================================================
 
-def _is_qwidget_subclass(obj: Any) -> bool:
-    """True se obj é uma classe que herda de QWidget (e não é Protocol)."""
-    try:
-        return inspect.isclass(obj) and issubclass(obj, QWidget) and not _is_protocol(obj)
-    except Exception:
-        return False
-
-def _safe_import(modname: str):
-    return importlib.import_module(modname)
-
-def _get_page_meta(mod) -> Optional[Dict[str, Any]]:
-    PAGE = getattr(mod, "PAGE", None)
-    if not isinstance(PAGE, dict):
-        return None
-    # defaults
-    return {
-        "route":   PAGE.get("route") or getattr(mod, "__name__", "page"),
-        "label":   PAGE.get("label") or PAGE.get("route") or "Página",
-        "sidebar": bool(PAGE.get("sidebar", True)),
-        "order":   int(PAGE.get("order", 999)),
-    }
-
-def _resolve_factory(mod) -> Optional[Callable[..., QWidget]]:
-    """
-    Política:
-      1) Se houver função module-level `build(task_runner=None, theme_service=None)`, usamos ela.
-      2) Senão, se existir uma classe QWidget principal (ex.: HomePage, SettingsPage), criamos uma
-         fábrica que instancia essa classe (passando kwargs somente se suportados).
-    """
-    # 1) build() explícito
-    build_fn = getattr(mod, "build", None)
-    if callable(build_fn):
-        return build_fn
-
-    # 2) primeira classe QWidget "pública" encontrada
-    candidates: List[type] = []
-    for name, obj in inspect.getmembers(mod, inspect.isclass):
-        if name.startswith("_"):
+def _normalize(specs: List[PageSpec]) -> List[PageSpec]:
+    """Remove duplicatas por route, ordena por (order, label) e filtra inválidos."""
+    by_route: dict[str, PageSpec] = {}
+    for spec in specs:
+        if not isinstance(spec, PageSpec):
             continue
-        if _is_qwidget_subclass(obj):
-            # evita classes internas do PySide / metaclasses etc.
-            if obj.__module__ == mod.__name__:
-                candidates.append(obj)
+        if not spec.is_valid():
+            print(f"[WARN] Ignorando PageSpec inválida: {spec}")
+            continue
+        by_route[spec.route] = spec  # último vence
+    out = list(by_route.values())
+    out.sort(key=lambda s: (getattr(s, "order", 1000), s.label or s.route))
+    return out
 
-    if not candidates:
+
+def _safe_import(module_name: str) -> Any | None:
+    try:
+        return importlib.import_module(module_name)
+    except Exception as e:  # noqa: BLE001
+        print(f"[WARN] Falha ao importar módulo '{module_name}': {e}")
         return None
 
-    cls = candidates[0]
 
-    def _factory(**kwargs) -> QWidget:
-        sig = inspect.signature(cls)
-        # mantém apenas kwargs aceitos pela __init__
-        use = {k: v for k, v in kwargs.items() if k in sig.parameters}
-        return cls(**use) if use else cls()
+def _infer_route_from_module_name(module_name: str) -> str:
 
-    return _factory
+    last = module_name.split(".")[-1]
+    if last.endswith("_page"):
+        last = last[:-5]
+    return last.replace("_", "-")  # rota amigável
 
 
-# ---------- carregadores ----------
+def _discover_from_module(module) -> List[PageSpec]:
+
+    specs: List[PageSpec] = []
+    if not module:
+        return specs
+
+    factory = getattr(module, "build", None)
+    if not callable(factory):
+        return specs  # sem build, não é página
+
+    # defaults por inferência
+    route = _infer_route_from_module_name(getattr(module, "__name__", "page"))
+    label = route
+    sidebar = True
+    order = 1000
+
+    # 1) se houver PAGE dict, usa-o
+    meta = getattr(module, "PAGE", None)
+    if isinstance(meta, dict):
+        route = meta.get("route", route)
+        label = meta.get("label", label)
+        sidebar = meta.get("sidebar", sidebar)
+        order = meta.get("order", order)
+    else:
+        # 2) senão, tenta as constantes
+        route = getattr(module, "ROUTE", getattr(module, "route", route))
+        label = getattr(module, "LABEL", getattr(module, "label", label))
+        sidebar = getattr(module, "SIDEBAR", getattr(module, "sidebar", sidebar))
+        order = getattr(module, "ORDER", getattr(module, "order", order))
+
+    route = _normalize_route(route)
+
+    try:
+        specs.append(PageSpec(route=route, label=label, sidebar=bool(sidebar), order=int(order), factory=factory))
+    except Exception as e:  # noqa: BLE001
+        print(f"[WARN] Erro ao extrair PageSpec de módulo {getattr(module, '__name__', module)}: {e}")
+
+    return specs
+
+
+def _resolve_factory(module_name: str, func_name: str) -> Callable[..., QWidget] | None:
+    mod = _safe_import(module_name)
+    if not mod:
+        return None
+    fn = getattr(mod, func_name, None)
+    if callable(fn):
+        return fn
+    print(f"[WARN] Função '{func_name}' não encontrada em módulo '{module_name}'.")
+    return None
+
+
+def _try_infer_module_from_route(route: str, base_pkg: str = "ui.pages") -> list[str]:
+
+    dotted = route.replace("/", ".").replace("-", "_")
+    cands = [
+        f"{base_pkg}.{dotted}_page",
+        f"{base_pkg}.{dotted}",
+    ]
+    # variação simples: rota sem pontos no final
+    if "." not in dotted:
+        cands.extend([f"{base_pkg}.{route}_page", f"{base_pkg}.{route}"])
+    return cands
+
+
+# ============================================================
+#  Manifest loader (suporta vários formatos)
+# ============================================================
+
+JsonLike = Union[dict, list, str, int, float, bool, None]
+
+
+def _coerce_manifest_items(data: JsonLike) -> List[dict]:
+
+    items: List[dict] = []
+
+    # Caso mais comum: lista
+    if isinstance(data, list):
+        for it in data:
+            if isinstance(it, dict):
+                items.append(it)
+            elif isinstance(it, str):
+                # string pode ser "module:function" OU "module"
+                if ":" in it:
+                    items.append({"factory": it})
+                else:
+                    items.append({"module": it, "factory": "build"})
+            else:
+                print(f"[WARN] Item de manifesto ignorado (tipo não suportado em lista): {type(it).__name__}")
+        return items
+
+    # Objeto único
+    if isinstance(data, dict):
+        # Heurística: se tem chaves 'route' ou 'factory', é um único item
+        if any(k in data for k in ("route", "factory", "module", "label", "sidebar", "order")):
+            return [data]
+        # Mapa de rotas:
+        # { "home": "ui.pages.home_page:build", "settings": {"module":"...", "factory":"build"} }
+        for route, spec in data.items():
+            if isinstance(spec, str):
+                if ":" in spec:
+                    items.append({"route": route, "factory": spec})
+                else:
+                    items.append({"route": route, "module": spec, "factory": "build"})
+            elif isinstance(spec, dict):
+                obj = {"route": route}
+                obj.update(spec)
+                items.append(obj)
+            else:
+                print(f"[WARN] Valor de rota inválido no manifesto: route={route} type={type(spec).__name__}")
+        return items
+
+    # Qualquer outra coisa (ex.: lista de palavras ["route","label",...]): ignorar e avisar
+    print("[ERRO] Formato de manifesto inválido; esperado lista/objeto JSON.")
+    return []
+
+
+def load_from_manifest(manifest_path: Path) -> List[PageSpec]:
+
+    specs: List[PageSpec] = []
+    if not manifest_path.exists():
+        print(f"[INFO] Manifesto não encontrado: {manifest_path}")
+        return specs
+
+    try:
+        raw = manifest_path.read_text(encoding="utf-8")
+        data = json.loads(raw)
+    except Exception as e:  # noqa: BLE001
+        print(f"[ERRO] Falha ao ler manifesto de páginas: {e}")
+        return specs
+
+    items = _coerce_manifest_items(data)
+
+    for item in items:
+        try:
+            route = item.get("route", "")
+            label = item.get("label", route or None)
+            sidebar = bool(item.get("sidebar", True))
+            order = int(item.get("order", 1000))
+
+            factory: Callable[..., QWidget] | None = None
+
+            # Prioridade 1: formato novo "module:function" em item["factory"]
+            factory_ref = item.get("factory")
+            module_name = item.get("module")
+
+            if isinstance(factory_ref, str) and ":" in factory_ref:
+                mod_name, func_name = factory_ref.split(":", 1)
+                factory = _resolve_factory(mod_name, func_name)
+
+                # Se route vazio, inferir a partir do módulo
+                if not route:
+                    route = _infer_route_from_module_name(mod_name)
+
+            elif isinstance(factory_ref, str):
+                # "build" ou outro nome de função
+                func_name = factory_ref
+
+                # 1) Se veio 'module', usar
+                if module_name:
+                    factory = _resolve_factory(module_name, func_name)
+                    if not route:
+                        route = _infer_route_from_module_name(module_name)
+
+                # 2) Se não veio módulo, tentar deduzir pelo route
+                if not factory:
+                    # se ainda não temos route, não há como inferir módulo — fica para o próximo item
+                    if not route:
+                        print(f"[WARN] Item do manifesto com 'factory'='{factory_ref}' mas sem 'module' e sem 'route'. Ignorando.")
+                        continue
+                    for cand in _try_infer_module_from_route(route):
+                        factory = _resolve_factory(cand, func_name)
+                        if factory:
+                            break
+
+                if not factory:
+                    print(f"[WARN] Factory inválida em manifesto: '{factory_ref}' (rota='{route or '?'}'). "
+                          f"Informe 'module' ou use 'module:function'.")
+                    continue
+
+            elif module_name:
+                # módulo sem 'factory' → assumir 'build'
+                factory = _resolve_factory(module_name, "build")
+                if not route:
+                    route = _infer_route_from_module_name(module_name)
+
+            else:
+                print(f"[WARN] Item de manifesto sem 'factory'/'module' utilizáveis: {item}")
+                continue
+
+            route = _normalize_route(route)
+
+            if not label:
+                label = route
+
+            specs.append(PageSpec(route=route, label=label, sidebar=sidebar, order=order, factory=factory))
+
+        except Exception as e:  # noqa: BLE001
+            print(f"[WARN] Falha ao processar item do manifesto {item}: {e}")
+
+    return _normalize(specs)
+
+
+# ============================================================
+#  Auto-discovery de páginas (ui.pages.*)
+# ============================================================
 
 def discover_pages(package: str = "ui.pages") -> List[PageSpec]:
-    """
-    Auto-descoberta: varre ui.pages.*, importa módulos, lê PAGE e build/cls.
-    Ignora qualquer módulo sem PAGE ou sem fábrica válida.
-    """
+
     specs: List[PageSpec] = []
-    pkg = importlib.import_module(package)
-    for _, subname, ispkg in pkgutil.iter_modules(pkg.__path__, package + "."):
-        if ispkg:
-            # p.ex. ui.pages.admin.* – pode ter subpacotes; importe também
-            try:
-                subpkg = importlib.import_module(subname)
-            except Exception:
-                continue
-            # módulos dentro do subpacote
-            for _, submodname, _ in pkgutil.iter_modules(subpkg.__path__, subname + "."):
-                _try_collect(submodname, specs)
-        else:
-            _try_collect(subname, specs)
-
-    # ordena pela chave 'order'
-    specs.sort(key=lambda s: (s.order, s.label.lower()))
-    return specs
-
-
-def _try_collect(modname: str, out_specs: List[PageSpec]) -> None:
     try:
-        mod = _safe_import(modname)
-    except Exception:
-        return
+        pkg = importlib.import_module(package)
+        for _, module_name, _ in pkgutil.iter_modules(pkg.__path__, f"{package}."):
+            module = _safe_import(module_name)
+            if not module:
+                continue
+            found = _discover_from_module(module)
+            if not found:
+                # Só avisa se o nome do módulo parecer semanticamente uma página
+                last = module_name.split(".")[-1]
+                looks_like_page = last.endswith("_page") or last in {"home", "settings", "about", "dashboard"}
+                if looks_like_page and not callable(getattr(module, "build", None)):
+                    print(f"[INFO] Módulo '{module_name}' não expõe build(...).")
+            specs.extend(found)
+    except Exception as e:  # noqa: BLE001
+        print(f"[ERRO] Descoberta automática de páginas falhou: {e}")
 
-    meta = _get_page_meta(mod)
-    if not meta:
-        return
+    return _normalize(specs)
 
-    factory = _resolve_factory(mod)
-    if not callable(factory):
-        # sem fábrica válida -> ignora
-        return
+# ============================================================
+#  API pública
+# ============================================================
 
-    out_specs.append(
-        PageSpec(
-            route=meta["route"],
-            label=meta["label"],
-            sidebar=meta["sidebar"],
-            order=meta["order"],
-            factory=factory,
-        )
-    )
+def get_all_pages(manifest_path: Optional[Path] = None) -> List[PageSpec]:
+
+    manifest_specs = load_from_manifest(manifest_path) if manifest_path and manifest_path.exists() else []
+    auto_specs = discover_pages()
+    by_route = {s.route: s for s in auto_specs}
+    for s in manifest_specs:
+        by_route[s.route] = s
+    return _normalize(list(by_route.values()))
 
 
-def load_from_manifest(manifest_path: str) -> List[PageSpec]:
-    """
-    Lê um JSON/YAML (você quem define) e monta PageSpecs em ordem.
-    Para já, mantive por compatibilidade com teu fluxo anterior — opcional usar.
-    O formato esperado por item:
-      {"module": "ui.pages.home_page", "route": "home", "label": "Início",
-       "sidebar": true, "order": 1, "factory": "build"}
-    """
-    import json
-    from pathlib import Path
+# ============================================================
+#  CLI rápido (debug)
+# ============================================================
 
-    p = Path(manifest_path)
-    if not p.exists():
-        return []
-
-    raw = json.loads(p.read_text(encoding="utf-8"))
-    specs: List[PageSpec] = []
-    for item in raw:
-        try:
-            mod = _safe_import(item["module"])
-            meta = {
-                "route":   item.get("route") or getattr(mod, "PAGE", {}).get("route"),
-                "label":   item.get("label") or getattr(mod, "PAGE", {}).get("label", "Página"),
-                "sidebar": bool(item.get("sidebar", True)),
-                "order":   int(item.get("order", 999)),
-            }
-            fac_name = item.get("factory") or "build"
-            fac = getattr(mod, fac_name, None)
-            if not callable(fac):
-                # fallback: tenta class QWidget
-                fac = _resolve_factory(mod)
-            if not callable(fac):
-                raise RuntimeError(f"Factory '{fac_name}' não encontrada/Inválida em {item['module']}")
-            specs.append(PageSpec(
-                route=meta["route"],
-                label=meta["label"],
-                sidebar=meta["sidebar"],
-                order=meta["order"],
-                factory=fac
-            ))
-        except Exception as e:
-            # em produção, logue – aqui só ignora entrada ruim
-            continue
-
-    specs.sort(key=lambda s: (s.order, s.label.lower()))
-    return specs
+if __name__ == "__main__":
+    print("🔍 Descobrindo páginas em ui.pages...")
+    found = discover_pages()
+    for s in found:
+        print(f" - {s.route:20} | label={s.label:20} | sidebar={s.sidebar} | order={s.order}")

@@ -1,27 +1,64 @@
-# ui/pages/settings_page.py
+# ui/pages/settings.py
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QSize
+from pathlib import Path
+import re
+
+from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QComboBox,
     QHBoxLayout, QFrame, QSpacerItem, QSizePolicy,
-    QToolButton, QMenu, QDialog, QLineEdit, QPushButton
+    QMenu, QDialog, QLineEdit, QPushButton, QToolButton
 )
-from PySide6.QtGui import QIcon
 
 from ..core.theme_service import ThemeService
+    # Controls usado para o toggle de splash
 from ..widgets.buttons import Controls
 from .theme_editor import ThemeEditorDialog
 from ..core.frameless_window import FramelessDialog
 from ..widgets.titlebar import TitleBar
 
+# onde estão os temas; tenta vir de app.settings, cai para ui/assets/themes
+try:
+    import app.settings as cfg
+    THEMES_DIR_FALLBACK = Path(cfg.THEMES_DIR)
+except Exception:
+    THEMES_DIR_FALLBACK = Path(__file__).resolve().parents[2] / "assets" / "themes"
+
 PAGE = {
-    "route": "settings",
+    "route": "Settings",
     "label": "Configurações",
-    "sidebar": False,   # <— NÃO aparece mais na sidebar esquerda
+    "sidebar": False,
     "order": 99,
 }
+
+# paleta neutra para novos temas
+NEUTRAL_VARS = {
+    "bg_start": "#222222",
+    "bg_end": "#2E2E2E",
+    "bg": "#242424",
+    "surface": "#2F2F2F",
+    "text": "#E8E8E8",
+    "text_hover": "#FFFFFF",
+    "btn": "#5A5A5A",
+    "btn_hover": "#6A6A6A",
+    "btn_text": "#FFFFFF",
+    "hover": "#505050",
+    "accent": "#808080",
+    "input_bg": "#151515",
+    "box_border": "#666666",
+    "checkbox": "#C0C0C0",
+    "slider": "#C0C0C0",
+    "cond_selected": "#3B3B3B",
+    "window_bg": "#242424",
+}
+
+def _slugify(name: str) -> str:
+    s = re.sub(r"\s+", "_", name.strip())
+    s = re.sub(r"[^A-Za-z0-9_\-]", "", s)
+    return s[:64] or "novo_tema"
+
 
 class SettingsPage(QWidget):
     def __init__(self, theme_service: ThemeService):
@@ -51,23 +88,23 @@ class SettingsPage(QWidget):
         row.addWidget(QLabel("Selecionar:"))
 
         self.combo = QComboBox()
-        # comportamento: combo expande, botão fica compacto à direita
         self.combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.combo.setMinimumWidth(160)
         self.combo.setMaximumWidth(16777215)
         row.addWidget(self.combo, 1)
 
-        # Botão de "três pontinhos" com menu (Criar/Editar/Excluir)
+        # Botão "…" — QToolButton com menu nativo (InstantPopup)
         self.btn_more = QToolButton(self)
         self.btn_more.setObjectName("TinyMenuButton")
+        self.btn_more.setText("…")
         self.btn_more.setToolTip("Opções de tema")
-        self.btn_more.setPopupMode(QToolButton.InstantPopup)
-        self.btn_more.setToolButtonStyle(Qt.ToolButtonIconOnly)
         self.btn_more.setAutoRaise(True)
+        self.btn_more.setCursor(Qt.PointingHandCursor)
         self.btn_more.setFixedSize(26, 26)
-        self.btn_more.setText("⋯")  # texto => cor vem do QSS
+        self.btn_more.setPopupMode(QToolButton.InstantPopup)
 
         menu = QMenu(self.btn_more)
+        menu.setObjectName("ContextMenu")
         act_new  = menu.addAction("Criar tema")
         act_edit = menu.addAction("Editar tema")
         act_del  = menu.addAction("Excluir tema")
@@ -102,10 +139,9 @@ class SettingsPage(QWidget):
         splash_row.setContentsMargins(0, 0, 0, 0)
         splash_row.setSpacing(8)
 
-        # checked = pular splash => gravar splash=False
         self.tgl_splash = Controls.Toggle(width=34, height=18)
-        show_splash = bool(self._st.read("splash", True))  # default: True (mostrar)
-        self.tgl_splash.setChecked(not show_splash)        # marcado => NÃO mostrar
+        show_splash = bool(self._st.read("splash", True))
+        self.tgl_splash.setChecked(not show_splash)
 
         self.lbl_splash = QLabel()
         def _update_splash_label(checked: bool):
@@ -113,14 +149,11 @@ class SettingsPage(QWidget):
                 "Splash de inicialização desativada" if checked
                 else "Mostrar splash na inicialização"
             )
-
         _update_splash_label(self.tgl_splash.isChecked())
 
         def _on_toggle(v: bool):
-            # salva invertido: v=True (toggle ligado) => splash False (não mostrar)
             self._st.write("splash", not v)
             _update_splash_label(v)
-
         self.tgl_splash.toggled.connect(_on_toggle)
 
         splash_row.addWidget(self.tgl_splash)
@@ -135,15 +168,18 @@ class SettingsPage(QWidget):
         root.addWidget(card_general)
         root.addStretch(1)
 
-        # carregar + ligar combo
+        # carregar + ligar combo (usando FS como fonte de verdade)
         self._reload()
         self.combo.currentTextChanged.connect(
             lambda name: self.tm.apply(name, animate=True, persist=True)
         )
 
+        # >>> NOVO: se alguém criar/apagar/renomear/editar via ThemeService,
+        # a lista reflete imediatamente (sem reiniciar app).
+        self.tm.themesChanged.connect(lambda _names: self._reload())
+
     # ---------- helpers (frameless dialogs) ----------
     def _prompt_text(self, title: str, label: str, initial: str = "") -> tuple[str, bool]:
-        """Dialogo frameless simples para entrada de texto."""
         dlg = FramelessDialog(self)
         root = QWidget(dlg)
         v = QVBoxLayout(root); v.setContentsMargins(12, 12, 12, 12); v.setSpacing(10)
@@ -153,8 +189,7 @@ class SettingsPage(QWidget):
         v.addWidget(tb)
 
         v.addWidget(QLabel(label, root))
-        edit = QLineEdit(root)
-        edit.setText(initial)
+        edit = QLineEdit(root); edit.setText(initial)
         v.addWidget(edit)
 
         btn_row = QHBoxLayout(); btn_row.setSpacing(8)
@@ -164,14 +199,11 @@ class SettingsPage(QWidget):
         v.addLayout(btn_row)
 
         dlg.setCentralWidget(root)
-        dlg.resize(420, 220)
-        dlg.shrink_to(QSize(420, 220), center=False)
-
+        dlg.resize(420, 220); dlg.shrink_to(QSize(420, 220), center=False)
         ok = dlg.exec() == QDialog.Accepted
         return edit.text(), ok
 
     def _confirm(self, title: str, message: str) -> bool:
-        """Dialogo frameless de confirmação OK/Cancel."""
         dlg = FramelessDialog(self)
         root = QWidget(dlg)
         v = QVBoxLayout(root); v.setContentsMargins(12, 12, 12, 12); v.setSpacing(10)
@@ -190,13 +222,10 @@ class SettingsPage(QWidget):
         v.addLayout(btn_row)
 
         dlg.setCentralWidget(root)
-        dlg.resize(420, 200)
-        dlg.shrink_to(QSize(420, 200), center=False)
-
+        dlg.resize(420, 200); dlg.shrink_to(QSize(420, 200), center=False)
         return dlg.exec() == QDialog.Accepted
 
     def _info(self, title: str, message: str) -> None:
-        """Dialogo frameless informativo com um botão OK."""
         dlg = FramelessDialog(self)
         root = QWidget(dlg)
         v = QVBoxLayout(root); v.setContentsMargins(12, 12, 12, 12); v.setSpacing(10)
@@ -215,14 +244,42 @@ class SettingsPage(QWidget):
         v.addLayout(btn_row)
 
         dlg.setCentralWidget(root)
-        dlg.resize(420, 180)
-        dlg.shrink_to(QSize(420, 180), center=False)
+        dlg.resize(420, 180); dlg.shrink_to(QSize(420, 180), center=False)
         dlg.exec()
 
+    # ---------- fonte de verdade: diretório de temas ----------
+    def _repo_themes_dir(self) -> Path:
+        """Tenta descobrir a pasta usada pelo repositório; cai no fallback."""
+        repo = getattr(self.tm, "_repo", None)
+        # incluir 'theme_dir' (singular), que é o atributo do JsonThemeRepository
+        for attr in ("theme_dir", "themes_dir", "themes_path", "base_dir", "root", "dir", "path"):
+            p = getattr(repo, attr, None)
+            if isinstance(p, (str, Path)):
+                pp = Path(p)
+                if pp.exists():
+                    return pp
+        return THEMES_DIR_FALLBACK
+
+    def _scan_fs_names(self) -> list[str]:
+        d = self._repo_themes_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        return sorted(p.stem for p in d.glob("*.json"))
+
+    def _default_theme_name(self, names: list[str]) -> str:
+        for attr in ("default_theme_name", "default", "DEFAULT_THEME", "DEFAULT"):
+            val = getattr(self.tm, attr, None)
+            if isinstance(val, str) and val in names:
+                return val
+        for guess in ("default", "Default", "samurai", "Samurai"):
+            if guess in names:
+                return guess
+        return names[0] if names else ""
+
     # ---------- data/load ----------
-    def _reload(self):
-        current = self.tm.current() or self.tm.load_selected_from_settings()
-        names = self.tm.available() or []
+    def _reload(self, select: str | None = None):
+        """Recarrega SEM cache, usando o ThemeService como fonte de verdade."""
+        names = sorted(self.tm.available())
+        current = select or self.tm.current() or self.tm.load_selected_from_settings()
 
         self.combo.blockSignals(True)
         self.combo.clear()
@@ -233,66 +290,94 @@ class SettingsPage(QWidget):
             self.combo.setCurrentIndex(0)
         self.combo.blockSignals(False)
 
+    # ---------- abrir editor (usando exec() via singleShot) ----------
+    def _open_theme_editor(self, name: str, props: dict, on_accept=None):
+        """Abre o editor de temas. Usa exec() síncrono, mas agenda via singleShot
+        para evitar conflitos com QMenu e garantir que o loop esteja livre."""
+        def _run():
+            dlg = ThemeEditorDialog(name, props, self)
+            result = dlg.exec()
+            if on_accept and result == QDialog.Accepted:
+                on_accept(dlg)
+        QTimer.singleShot(0, _run)
+
     # ---------- actions ----------
     def _new_theme(self):
-        name, ok = self._prompt_text("Novo tema", "Nome do tema:")
-        if not ok or not name.strip():
+        raw, ok = self._prompt_text("Novo tema", "Nome do tema:")
+        if not ok or not raw.strip():
             return
-        name = name.strip()
 
-        if name in (self.tm.available() or []):
+        name = _slugify(raw)
+        if name in (self._scan_fs_names() or []):
             self._info("Tema existente", f"Já existe um tema chamado '{name}'.")
             return
 
-        base_name = self.tm.current() or (self.tm.available()[0] if self.tm.available() else None)
-        base_props = self.tm._repo.load_theme(base_name) if base_name else {}
+        # cria tema neutro e salva via serviço (façade)
+        initial = {"vars": dict(NEUTRAL_VARS)}
+        self.tm.save_theme(name, initial)
 
-        dlg = ThemeEditorDialog(name, base_props, self)
-        if dlg.exec():
+        # abre editor; ao aceitar, salva alterações e aplica
+        def _accepted(dlg: ThemeEditorDialog):
             try:
                 new_data = dlg.get_theme_data()
             except AttributeError:
                 new_data = {"vars": getattr(dlg, "props", {})}
-
-            self.tm._repo.save_theme(name, new_data)
-            self._reload()
+            self.tm.save_theme(name, new_data)
+            self._reload(select=name)
             self.tm.apply(name, animate=True, persist=True)
+
+        self._open_theme_editor(name, initial, on_accept=_accepted)
+        # lista deve refletir imediatamente o novo arquivo
+        self._reload(select=name)
 
     def _edit_theme(self):
         name = self.combo.currentText().strip()
         if not name:
             return
-        props = self.tm._repo.load_theme(name)
-        dlg = ThemeEditorDialog(name, props, self)
-        if dlg.exec():
+        props = self.tm.load_theme(name)
+
+        def _accepted(dlg: ThemeEditorDialog):
             try:
                 new_data = dlg.get_theme_data()
             except AttributeError:
                 new_data = {"vars": getattr(dlg, "props", {})}
-            self.tm._repo.save_theme(name, new_data)
+            self.tm.save_theme(name, new_data)
             self.tm.apply(name, animate=True, persist=True)
-            self._reload()
+            self._reload(select=name)
+
+        self._open_theme_editor(name, props, on_accept=_accepted)
 
     def _delete_theme(self):
         name = self.combo.currentText().strip()
         if not name:
             return
-        names = self.tm.available() or []
+
+        names = self._scan_fs_names()
         if len(names) <= 1:
             self._info("Não permitido", "Você não pode excluir o único tema disponível.")
             return
+
+        default_name = self._default_theme_name(names)
+        if name == default_name:
+            self._info("Não permitido", f"O tema padrão ('{default_name}') não pode ser excluído.")
+            return
+
         if not self._confirm("Confirmar", f"Deseja excluir o tema '{name}'?"):
             return
 
-        self.tm._repo.delete_theme(name)
-        fallback_list = self.tm.available() or []
-        if not fallback_list:
-            self._reload()
-            return
-        fallback = fallback_list[0]
-        self._reload()
-        self.combo.setCurrentText(fallback)
-        self.tm.apply(fallback, animate=True, persist=True)
+        self.tm.delete_theme(name)
+
+        # recarrega do FS e aplica o padrão (ou primeiro disponível)
+        names_after = self._scan_fs_names()
+        if not names_after:
+            # segurança: restaura um tema neutro como padrão
+            fallback = "default"
+            self.tm.save_theme(fallback, {"vars": dict(NEUTRAL_VARS)})
+            names_after = [fallback]
+
+        apply_name = default_name if default_name in names_after else names_after[0]
+        self._reload(select=apply_name)
+        self.tm.apply(apply_name, animate=True, persist=True)
 
     # ---------- factory ----------
     @staticmethod
@@ -301,6 +386,6 @@ class SettingsPage(QWidget):
             raise ValueError("SettingsPage.build requer theme_service")
         return SettingsPage(theme_service)
 
-# ====== FACTORY (nível de módulo) ======
+
 def build(task_runner=None, theme_service=None):
     return SettingsPage.build(task_runner=task_runner, theme_service=theme_service)

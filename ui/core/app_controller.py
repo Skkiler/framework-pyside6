@@ -1,73 +1,95 @@
 # ui/core/app_controller.py
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Iterable, List, Optional
 
 from ..services.task_runner_adapter import TaskRunnerAdapter
 from .app import AppShell
-from ..pages.registry import load_from_manifest, discover_pages  # <- nomes corretos
+from ..pages.registry import load_from_manifest, discover_pages
 
 
-def _merge_specs(primary, fallback):
-    """
-    Junta listas de PageSpec:
-      - primary (manifest) tem prioridade sobre fallback (autodiscovery)
-      - deduplica por route
-      - ordena por (order, label)
-    """
-    by_route: Dict[str, object] = {}
+@dataclass(frozen=True)
+class ControllerConfig:
+    assets_dir: Path
+    themes_dir: Path
+    base_qss_path: Path
+    app_title: str
+    default_theme: str
+    first_page: str
+    manifest_filename: str
+
+
+def _merge_specs(primary: Iterable, fallback: Iterable) -> List:
+    # primary (manifest) tem prioridade; dedup por route; ordena por (order, label)
+    by_route = {}
     for spec in fallback:
         by_route[getattr(spec, "route", "")] = spec
     for spec in primary:
         by_route[getattr(spec, "route", "")] = spec  # override
     merged = list(by_route.values())
-    merged.sort(key=lambda s: (getattr(s, "order", 999), getattr(s, "label", "").lower()))
+    merged.sort(key=lambda s: (getattr(s, "order", 1000), getattr(s, "label", getattr(s, "route", ""))))
     return merged
 
 
 class AppController:
+    """
+    Responsável por:
+      - construir AppShell com serviços injetados
+      - carregar PageSpecs (manifest + autodiscovery)
+      - registrar páginas
+      - iniciar tema e primeira rota
+    """
+
     def __init__(
         self,
+        *,
         task_runner,
         assets_dir: str,
-        *,
-        auto_start: bool = True,
-        default_theme: str = "Dracula",
-        first_page: str = "home",
-        manifest_filename: str = "pages_manifest.json",   # opcional
+        base_qss_path: str,
+        themes_dir: str,
+        default_theme: str,
+        first_page: str,
+        manifest_filename: str,
+        settings,
+        app_title: str,
     ):
-        self.task_runner = TaskRunnerAdapter(task_runner)
+        self.cfg = ControllerConfig(
+            assets_dir=Path(assets_dir),
+            themes_dir=Path(themes_dir),
+            base_qss_path=Path(base_qss_path),
+            app_title=app_title,
+            default_theme=default_theme,
+            first_page=first_page,
+            manifest_filename=manifest_filename,
+        )
+        self.settings = settings
+        self.task_runner_adapter = TaskRunnerAdapter(task_runner) if task_runner else None
 
-        assets_dir_path = Path(assets_dir)
-        base_qss   = str(assets_dir_path / "qss" / "base.qss")
-        themes_dir = str(assets_dir_path / "themes")
+        self.shell = AppShell(
+            title=self.cfg.app_title,
+            assets_dir=str(self.cfg.assets_dir),
+            themes_dir=str(self.cfg.themes_dir),
+            base_qss_path=str(self.cfg.base_qss_path),
+            settings=self.settings,
+        )
 
-        self.app = AppShell("Executável", assets_dir, themes_dir, base_qss)
+        # Carrega e registra páginas
+        self._init_pages()
 
-        # 1) tenta manifesto (se existir) + 2) auto-discovery fallback
-        manifest_path = assets_dir_path / manifest_filename
-        pri = load_from_manifest(str(manifest_path)) if manifest_path.exists() else []
-        fb  = discover_pages("ui.pages")
+        # Inicia tema + primeira rota
+        self.shell.start(first_route=self.cfg.first_page, default_theme=self.cfg.default_theme)
 
-        specs = _merge_specs(pri, fb)
+    # ----- ciclo de páginas -----
+    def _init_pages(self):
+        manifest_path = self.cfg.assets_dir / self.cfg.manifest_filename
+        from_manifest = load_from_manifest(manifest_path) if manifest_path.exists() else []
+        auto = discover_pages()
+        specs = _merge_specs(from_manifest, auto)
+        self.shell.register_pages(specs, task_runner=self.task_runner_adapter)
 
-        # registra em lote
-        self.app.register_pages(specs, task_runner=self.task_runner)
-
-        self._first_page    = first_page
-        self._default_theme = default_theme
-        if auto_start:
-            self.start()
-
-    def start(self, first_page: Optional[str] = None, default_theme: Optional[str] = None) -> None:
-        page  = first_page or self._first_page
-        theme = default_theme or self._default_theme
-        self.app.start(page, default_theme=theme)
-
-    def show(self) -> None:
-        self.app.show()
-
-    @property
-    def theme_service(self):
-        return self.app.theme_service
+    # ----- API simples -----
+    def show(self):
+        self.shell.show()

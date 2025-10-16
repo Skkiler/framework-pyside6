@@ -1,7 +1,10 @@
 # ui/core/router.py
 
-from PySide6.QtWidgets import QStackedWidget, QWidget
+from __future__ import annotations
+
 from typing import Dict, Optional
+from PySide6.QtWidgets import QStackedWidget, QWidget
+
 
 class Router(QStackedWidget):
     def __init__(self, parent=None):
@@ -11,38 +14,21 @@ class Router(QStackedWidget):
         self._current_name: Optional[str] = None
 
     def register(self, name: str, widget: QWidget):
+        if not name or not isinstance(widget, QWidget):
+            raise ValueError("Rota inválida ou widget inválido.")
         self._pages[name] = widget
         self.addWidget(widget)
 
     def go(self, name: str, params: Optional[dict] = None):
         if name not in self._pages:
             raise KeyError(f"Rota '{name}' não registrada.")
-
-        # on_leave da atual (se existir)
-        if self._current_name:
-            cur = self._pages.get(self._current_name)
-            if cur and hasattr(cur, "on_leave"):
-                try:
-                    cur.on_leave()
-                except Exception:
-                    pass
-
-        # troca de página
         target = self._pages[name]
         self.setCurrentWidget(target)
         self._current_name = name
-
-        # on_enter da nova (se existir)
-        if hasattr(target, "on_enter"):
+        # Se a página aceitar `on_route(params)`, chamamos (DIP)
+        on_route = getattr(target, "on_route", None)
+        if callable(on_route):
             try:
-                if params is None:
-                    target.on_enter()
-                else:
-                    target.on_enter(params)
-            except TypeError:
-                try:
-                    target.on_enter()
-                except Exception:
-                    pass
-            except Exception:
-                pass
+                on_route(params or {})
+            except Exception as e:  # noqa: BLE001
+                print(f"[WARN] on_route('{name}') falhou:", e)

@@ -9,6 +9,7 @@ from ..widgets.buttons import Controls  # usamos Controls.IconButton
 
 EXPANDED_WIDTH = 240
 
+
 class OverlaySidePanel(QFrame):
     pageSelected = Signal(str)
     opened = Signal()
@@ -87,19 +88,28 @@ class OverlaySidePanel(QFrame):
         super().keyPressEvent(e)
 
     def _full_rect(self) -> QRect:
+        """
+        Retorna a área útil do parent (abaixo da TitleBar, se houver).
+        """
         p = self.parent()
-        return p.rect() if p else QRect()
+        if not p:
+            return QRect()
+        top = 0
+        tb = p.findChild(QWidget, "TitleBar")
+        if tb and tb.isVisible():
+            top = tb.height()
+        return QRect(0, top, p.width(), max(0, p.height() - top))
 
     def _place_initial(self):
         fr = self._full_rect()
-        self.setGeometry(QRect(-EXPANDED_WIDTH, 0, EXPANDED_WIDTH, fr.height()))
+        self.setGeometry(QRect(-EXPANDED_WIDTH, fr.y(), EXPANDED_WIDTH, fr.height()))
         if self._scrim:
             self._scrim.setGeometry(fr)
 
     def _reposition(self):
         fr = self._full_rect()
         r = self.geometry()
-        self.setGeometry(QRect(r.x(), 0, r.width(), fr.height()))
+        self.setGeometry(QRect(r.x(), fr.y(), r.width(), fr.height()))
         if self._scrim:
             self._scrim.setGeometry(fr)
 
@@ -117,6 +127,8 @@ class OverlaySidePanel(QFrame):
         self._pending_after = None
 
         if self._scrim:
+            fr = self._full_rect()
+            self._scrim.setGeometry(fr)
             self._scrim.show()
             self._scrim.raise_()
 
@@ -126,8 +138,8 @@ class OverlaySidePanel(QFrame):
         self.btn_hamb.setEnabled(False)
 
         fr = self._full_rect()
-        start = QRect(-EXPANDED_WIDTH, 0, EXPANDED_WIDTH, fr.height())
-        end   = QRect(0,             0, EXPANDED_WIDTH, fr.height())
+        start = QRect(-EXPANDED_WIDTH, fr.y(), EXPANDED_WIDTH, fr.height())
+        end   = QRect(0,              fr.y(), EXPANDED_WIDTH, fr.height())
         if animate:
             self._anim.stop()
             self._anim.setStartValue(start)
@@ -146,8 +158,8 @@ class OverlaySidePanel(QFrame):
         self._in_anim = True
 
         fr = self._full_rect()
-        start = QRect(self.geometry().x(), 0, EXPANDED_WIDTH, fr.height())
-        end   = QRect(-EXPANDED_WIDTH,     0, EXPANDED_WIDTH, fr.height())
+        start = QRect(self.geometry().x(), fr.y(), EXPANDED_WIDTH, fr.height())
+        end   = QRect(-EXPANDED_WIDTH,       fr.y(), EXPANDED_WIDTH, fr.height())
 
         def _after():
             self.hide()

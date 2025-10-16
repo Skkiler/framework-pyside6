@@ -12,7 +12,7 @@ PAGE = {
     "route": "home",
     "label": "Início",
     "sidebar": True,
-    "order": 1,
+    "order": 0,
 }
 
 class HomePage(QWidget):

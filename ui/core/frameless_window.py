@@ -1,39 +1,49 @@
 # ui/core/frameless_window.py
 
 from __future__ import annotations
-from typing import Optional
+from typing import Optional, Callable, Iterable
 
 from PySide6.QtCore import (
     Qt, QRect, QPoint, QEasingCurve, QPropertyAnimation, QEvent, QSize, QObject,
-    QParallelAnimationGroup, QSequentialAnimationGroup, QTimer, QEventLoop
+    QParallelAnimationGroup, QSequentialAnimationGroup, QTimer, QEventLoop,
 )
-from PySide6.QtGui import QMouseEvent, QKeySequence, QCursor, QShortcut
+from PySide6.QtGui import QMouseEvent, QKeySequence, QCursor, QShortcut, QGuiApplication
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QGraphicsDropShadowEffect, QDialog
+    QMainWindow, QWidget, QVBoxLayout, QGraphicsDropShadowEffect, QDialog, QSizePolicy,
 )
 
-# --------- TUNÁVEIS ----------------------------------------------------------
-_RESIZE_MARGIN        = 9
-_CORNER_MARGIN        = 14
-_TOP_RESIZE_PRIORITY  = True
-_TITLEBAR_DRAG_GAP    = 12
-_DRAG_RESTORE_THRESH  = 4
-_SNAP_THRESHOLD       = 24
-_GEO_MS_DEFAULT       = 340
-_FADE_MS_DEFAULT      = 200
+# =============================================================================
+#  TUNÁVEIS (centralizados)
+# =============================================================================
+class _Fx:
+    RESIZE_MARGIN       = 9
+    CORNER_MARGIN       = 14
+    TOP_RESIZE_PRIORITY = True
+    TITLEBAR_DRAG_GAP   = 12
+    DRAG_RESTORE_THRESH = 4
+    SNAP_THRESHOLD      = 24
+    GEO_MS_DEFAULT      = 340
+    FADE_MS_DEFAULT     = 200
 
+
+# =============================================================================
+#  Janela principal sem moldura
+# =============================================================================
 class FramelessWindow(QMainWindow):
 
+    # --------------------------------------------------------------------- init
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        # Flags base
+        # Flags/atributos de janela
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setMouseTracking(True)
-        self._titlebars: list[QWidget] = []
 
-        # ---- ESTADO ----------------------------------------------------------
+        # Estado interno
+        self._titlebars: list[QWidget] = []
+        self._draggables: list[QWidget] = []
+
         self._resizing = False
         self._resize_pos = QPoint()
         self._resize_edges = (False, False, False, False)  # left, top, right, bottom
@@ -41,24 +51,22 @@ class FramelessWindow(QMainWindow):
         self._dragging = False
         self._drag_pos = QPoint()
         self._drag_press_global = QPoint()
-        self._draggables: list[QWidget] = []
 
         self._normal_geometry: Optional[QRect] = None
         self._is_maximized = False
+        self._was_minimized = self.isMinimized()
 
         self._geo_anim: Optional[QPropertyAnimation] = None
         self._fade_anim: Optional[QPropertyAnimation] = None
-        self._anim_refs: list[QObject] = []   # <- evita GC precoce de grupos
+        self._anim_refs: list[QObject] = []  # guarda refs para grupos/anim
 
-        self._geo_ms = _GEO_MS_DEFAULT
-        self._fade_ms = _FADE_MS_DEFAULT
+        self._geo_ms = _Fx.GEO_MS_DEFAULT
+        self._fade_ms = _Fx.FADE_MS_DEFAULT
 
         self._shadow_effect: Optional[QGraphicsDropShadowEffect] = None
         self._shadow_ready = False
-        self._heavy_animating = False  # evita setCursor durante anim pesada
-
+        self._heavy_animating = False
         self._first_show_done = False
-        self._was_minimized = self.isMinimized()
 
         # ---- FRAME + CONTENT --------------------------------------------------
         self._frame = QWidget(self)
@@ -77,11 +85,12 @@ class FramelessWindow(QMainWindow):
         self._content.setAttribute(Qt.WA_StyledBackground, True)
         self._content.setAttribute(Qt.WA_Hover, True)
         self._content.setMouseTracking(True)
+        self._content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._frame_layout.addWidget(self._content)
 
         super().setCentralWidget(self._frame)
 
-        # filtros (após estado estabelecido)
+        # Filtros (após estado estabelecido)
         self._frame.installEventFilter(self)
         self._content.installEventFilter(self)
 
@@ -89,7 +98,7 @@ class FramelessWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+M"), self, activated=self.minimize_with_fade)
         QShortcut(QKeySequence("Ctrl+Return"), self, activated=self.toggle_max_restore)
 
-    # ----------------------- SOMBRA TARDIA ------------------------------------
+    # ================================================================== Sombra
     def _ensure_shadow(self):
         if self._shadow_ready:
             return
@@ -109,27 +118,36 @@ class FramelessWindow(QMainWindow):
             return
         self._shadow_effect.setEnabled(enabled)
 
+    # ============================================================ lifecycle UI
     def showEvent(self, e):
         self._ensure_shadow()
         super().showEvent(e)
         # Animação de primeira abertura (uma única vez)
-        if not getattr(self, "_first_show_done", False):
+        if not self._first_show_done:
             self._first_show_done = True
-            # Evita interferir com maximizado
+            self.setWindowOpacity(0.0)
             if not self._is_maximized:
-                # Micro fade + micro-bounce suave
-                self.setWindowOpacity(0.0)
-                # Faz o fade depois do loop de eventos iniciar
                 QTimer.singleShot(0, lambda: self._animate_fade(0.0, 1.0, dur=max(220, self._fade_ms)))
-                # Bounce de "respirar" no retângulo atual
                 g = self.geometry()
                 self._animate_geometry_bounce(g, dur=max(220, self._geo_ms - 80), overshoot=0.035)
             else:
-                # Se abrir já maximizada, apenas fade
-                self.setWindowOpacity(0.0)
                 QTimer.singleShot(0, lambda: self._animate_fade(0.0, 1.0, dur=max(220, self._fade_ms)))
 
-    # --------------------------- API pública ----------------------------------
+    def changeEvent(self, e):
+        # Detecta transições de estado da janela (minimizado <-> normal)
+        if e.type() == QEvent.WindowStateChange:
+            was_min = self._was_minimized
+            now_min = self.isMinimized()
+            if was_min and not now_min:  # restaurou
+                self.setWindowOpacity(0.0)
+                QTimer.singleShot(0, lambda: self._animate_fade(0.0, 1.0, dur=max(200, self._fade_ms)))
+                if not self._is_maximized:
+                    g = self.geometry()
+                    self._animate_geometry_bounce(g, dur=max(200, self._geo_ms - 100), overshoot=0.035)
+            self._was_minimized = now_min
+        super().changeEvent(e)
+
+    # =================================================================== API
     def content(self) -> QWidget:
         return self._content
 
@@ -139,32 +157,37 @@ class FramelessWindow(QMainWindow):
         if fade_ms is not None:
             self._fade_ms = max(80, int(fade_ms))
 
-    def setCentralWidget(self, w: QWidget) -> None:
+    def setCentralWidget(self, w: QWidget) -> None:  # noqa: N802 (Qt API)
+        """Insere o widget dado dentro do content() mantendo um layout limpo."""
         layout = self._content.layout()
-        if layout is not None:
+        if layout is None:
+            layout = QVBoxLayout(self._content)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(0)
+        else:
+            # limpa widgets antigos
             while layout.count():
                 item = layout.takeAt(0)
                 if item and item.widget():
                     item.widget().setParent(None)
-        else:
-            from PySide6.QtWidgets import QVBoxLayout
-            layout = QVBoxLayout(self._content)
-            layout.setContentsMargins(0, 0, 0, 0)
-            layout.setSpacing(0)
         layout.addWidget(w)
         self._watch_widget_tree(w)
 
     def connect_titlebar(self, titlebar_widget: QWidget):
+        """Marca um widget como área de drag e conecta botões padrão."""
         self.register_draggable(titlebar_widget)
         if titlebar_widget not in self._titlebars:
             self._titlebars.append(titlebar_widget)
+
+        # Conecta sinais (se existirem)
         if hasattr(titlebar_widget, "minimizeRequested"):
             titlebar_widget.minimizeRequested.connect(self.minimize_with_fade)
         if hasattr(titlebar_widget, "maximizeRestoreRequested"):
             titlebar_widget.maximizeRestoreRequested.connect(self.toggle_max_restore)
         if hasattr(titlebar_widget, "closeRequested"):
             titlebar_widget.closeRequested.connect(self.close_with_shrink_fade)
-        # Estado inicial do ícone
+
+        # Estado inicial do ícone Max/Restore
         if hasattr(titlebar_widget, "setMaximized"):
             try:
                 titlebar_widget.setMaximized(self._is_maximized)
@@ -172,52 +195,92 @@ class FramelessWindow(QMainWindow):
                 pass
 
     def register_draggable(self, w: QWidget):
+        """Qualquer widget registrado aqui passa a arrastar a janela."""
         if w not in self._draggables:
             self._draggables.append(w)
             self._watch_widget_tree(w)
 
-    def changeEvent(self, e):
-        # Detecta transições de estado da janela (minimizado <-> normal)
-        if e.type() == QEvent.WindowStateChange:
-            was_min = getattr(self, "_was_minimized", False)
-            now_min = self.isMinimized()
-            # Se estava minimizada e deixou de estar => desminimizou
-            if was_min and not now_min:
-                # Faz um fade-in rápido; se não estiver maximizada, aplica um micro-bounce
-                self.setWindowOpacity(0.0)
-                QTimer.singleShot(0, lambda: self._animate_fade(0.0, 1.0, dur=max(200, self._fade_ms)))
-                if not self._is_maximized:
-                    g = self.geometry()
-                    self._animate_geometry_bounce(g, dur=max(200, self._geo_ms - 100), overshoot=0.035)
-            # Atualiza histórico
-            self._was_minimized = now_min
-        super().changeEvent(e)
-
-    # --- instala filtro e mouseTracking recursivamente + observa ChildAdded ---
-    def _watch_widget_tree(self, w: QWidget):
-        stack = [w]
+    # -------------------------------------------------------------- watcher/hit
+    def _watch_widget_tree(self, root: QWidget):
+        """Instala filtros e habilita hover/mouseTracking recursivamente."""
+        stack: list[QWidget] = [root]
         while stack:
             obj = stack.pop()
-            if isinstance(obj, QWidget):
-                obj.setAttribute(Qt.WA_Hover, True)
-                obj.setMouseTracking(True)
-                obj.installEventFilter(self)
-                for child in obj.children():
-                    if isinstance(child, QWidget):
-                        stack.append(child)
+            obj.setAttribute(Qt.WA_Hover, True)
+            obj.setMouseTracking(True)
+            obj.installEventFilter(self)
+            for child in obj.children():
+                if isinstance(child, QWidget):
+                    stack.append(child)
 
-    # ----------------------------- eventFilter --------------------------------
-    def eventFilter(self, obj: QObject, ev):
-        if not hasattr(self, "_draggables"):
+    def _edge_hit(self, pos: QPoint) -> bool:
+        l, t, r, b = self._calc_edges(pos)
+        return any((l, t, r, b))
+
+    def _top_resize_hit(self, pos: QPoint) -> bool:
+        if self._is_maximized:
             return False
+        return pos.y() <= max(_Fx.RESIZE_MARGIN, _Fx.TITLEBAR_DRAG_GAP)
 
+    def _calc_edges(self, pos: QPoint) -> tuple[bool, bool, bool, bool]:
+        """Retorna (left, top, right, bottom) se pos está em regiões de resize."""
+        if self._is_maximized:
+            return (False, False, False, False)
+
+        r = self.rect()
+        left   = pos.x() <= _Fx.RESIZE_MARGIN
+        right  = pos.x() >= r.width()  - _Fx.RESIZE_MARGIN
+        top    = pos.y() <= _Fx.RESIZE_MARGIN
+        bottom = pos.y() >= r.height() - _Fx.RESIZE_MARGIN
+
+        near_left   = pos.x() <= _Fx.CORNER_MARGIN
+        near_right  = pos.x() >= r.width()  - _Fx.CORNER_MARGIN
+        near_top    = pos.y() <= _Fx.CORNER_MARGIN
+        near_bottom = pos.y() >= r.height() - _Fx.CORNER_MARGIN
+
+        # diagonais antes — melhora UX
+        if (near_left and near_top) or (near_right and near_bottom):
+            return (near_left, near_top, near_right, near_bottom)
+        if (near_right and near_top) or (near_left and near_bottom):
+            return (near_left, near_top, near_right, near_bottom)
+
+        return left, top, right, bottom
+
+    def _update_cursor(self, pos: QPoint):
+        if self._heavy_animating or self._is_maximized:
+            return
+        left, top, right, bottom = self._calc_edges(pos)
+        if (left and top) or (right and bottom):
+            self.setCursor(Qt.SizeFDiagCursor)
+        elif (right and top) or (left and bottom):
+            self.setCursor(Qt.SizeBDiagCursor)
+        elif left or right:
+            self.setCursor(Qt.SizeHorCursor)
+        elif top or bottom:
+            self.setCursor(Qt.SizeVerCursor)
+        else:
+            self.unsetCursor()
+
+    def _start_resize_from_edges(self, win_pos: QPoint):
+        edges = self._calc_edges(win_pos)
+        if not any(edges):
+            if _Fx.TOP_RESIZE_PRIORITY and self._top_resize_hit(win_pos):
+                edges = (False, True, False, False)
+            else:
+                return
+        self._resizing = True
+        self._resize_edges = edges
+        self._resize_pos = self.mapToGlobal(win_pos)
+
+    # ----------------------------------------------------------------- filters
+    def eventFilter(self, obj: QObject, ev):
         # novos filhos => manter hover/resize funcionando
         if ev.type() == QEvent.ChildAdded:
             child = ev.child()
             if isinstance(child, QWidget):
                 self._watch_widget_tree(child)
 
-        # --- Draggables (TitleBar etc.) ---------------------------------------
+        # --- Draggables (TitleBar etc.)
         if obj in self._draggables:
             if ev.type() == QEvent.MouseButtonPress:
                 me: QMouseEvent = ev  # type: ignore
@@ -242,7 +305,7 @@ class FramelessWindow(QMainWindow):
 
                 if self._dragging:
                     gpos = me.globalPosition().toPoint()
-                    if self._is_maximized and (gpos - self._drag_press_global).manhattanLength() > _DRAG_RESTORE_THRESH:
+                    if self._is_maximized and (gpos - self._drag_press_global).manhattanLength() > _Fx.DRAG_RESTORE_THRESH:
                         self._restore_from_max_at_cursor(gpos); return True
                     if not self._is_maximized:
                         self.move(gpos - self._drag_pos); return True
@@ -264,7 +327,7 @@ class FramelessWindow(QMainWindow):
                 hpos = self.mapFromGlobal(QCursor.pos())
                 self._update_cursor(hpos)
 
-        # --- Resize / cursor update (frame/conteúdo/draggables) ---------------
+        # --- Resize / cursor update (frame/conteúdo/draggables)
         if obj in (self._frame, self._content) or obj in self._draggables:
             if ev.type() in (QEvent.MouseMove, QEvent.HoverMove):
                 if self._heavy_animating:
@@ -296,64 +359,7 @@ class FramelessWindow(QMainWindow):
 
         return super().eventFilter(obj, ev)
 
-    # -------------------------- hit test / cursor -----------------------------
-    def _edge_hit(self, pos: QPoint) -> bool:
-        left, top, right, bottom = self._calc_edges(pos)
-        return any((left, top, right, bottom))
-
-    def _top_resize_hit(self, pos: QPoint) -> bool:
-        if self._is_maximized:
-            return False
-        return pos.y() <= max(_RESIZE_MARGIN, _TITLEBAR_DRAG_GAP)
-
-    def _calc_edges(self, pos: QPoint) -> tuple[bool, bool, bool, bool]:
-        if self._is_maximized:
-            return (False, False, False, False)
-        r = self.rect()
-        left   = pos.x() <= _RESIZE_MARGIN
-        right  = pos.x() >= r.width()  - _RESIZE_MARGIN
-        top    = pos.y() <= _RESIZE_MARGIN
-        bottom = pos.y() >= r.height() - _RESIZE_MARGIN
-
-        near_left   = pos.x() <= _CORNER_MARGIN
-        near_right  = pos.x() >= r.width()  - _CORNER_MARGIN
-        near_top    = pos.y() <= _CORNER_MARGIN
-        near_bottom = pos.y() >= r.height() - _CORNER_MARGIN
-
-        if (near_left and near_top) or (near_right and near_bottom):
-            return (near_left, near_top, near_right, near_bottom)
-        if (near_right and near_top) or (near_left and near_bottom):
-            return (near_left, near_top, near_right, near_bottom)
-
-        return left, top, right, bottom
-
-    def _update_cursor(self, pos: QPoint):
-        if self._heavy_animating:
-            return
-        left, top, right, bottom = self._calc_edges(pos)
-        if (left and top) or (right and bottom):
-            self.setCursor(Qt.SizeFDiagCursor)
-        elif (right and top) or (left and bottom):
-            self.setCursor(Qt.SizeBDiagCursor)
-        elif left or right:
-            self.setCursor(Qt.SizeHorCursor)
-        elif top or bottom:
-            self.setCursor(Qt.SizeVerCursor)
-        else:
-            self.unsetCursor()
-
-    def _start_resize_from_edges(self, win_pos: QPoint):
-        edges = self._calc_edges(win_pos)
-        if not any(edges):
-            if _TOP_RESIZE_PRIORITY and self._top_resize_hit(win_pos):
-                edges = (False, True, False, False)
-            else:
-                return
-        self._resizing = True
-        self._resize_edges = edges
-        self._resize_pos = self.mapToGlobal(win_pos)
-
-    # -------------------------- fallback na janela ----------------------------
+    # -------------------------------------------------------------- mouse fallbacks
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton and not self._is_maximized:
             edges = self._calc_edges(e.position().toPoint())
@@ -378,6 +384,7 @@ class FramelessWindow(QMainWindow):
         self._resizing = False
         super().mouseReleaseEvent(e)
 
+    # -------------------------------------------------------------- resize impl
     def _perform_resize(self, delta: QPoint):
         geo: QRect = self.geometry()
         left, top, right, bottom = self._resize_edges
@@ -404,9 +411,10 @@ class FramelessWindow(QMainWindow):
 
         self.setGeometry(QRect(x, y, w, h))
 
-    # --------------------------- animações base --------------------------------
+    # ================================================================ animações
     def _keep_anim(self, anim: QObject):
         self._anim_refs.append(anim)
+
         def _cleanup():
             try:
                 self._anim_refs.remove(anim)
@@ -419,8 +427,15 @@ class FramelessWindow(QMainWindow):
         return anim
 
     def _available_rect(self) -> QRect:
-        screen = self.windowHandle().screen() if self.windowHandle() else None
-        return screen.availableGeometry() if screen else self.screen().availableGeometry()
+        # robusto mesmo sem windowHandle inicial
+        try:
+            screen = self.windowHandle().screen() if self.windowHandle() else None
+            if screen is None:
+                screen = self.screen()
+            return screen.availableGeometry()
+        except Exception:
+            # fallback seguro
+            return QRect(0, 0, 1280, 720)
 
     def _begin_heavy_anim(self):
         self._heavy_animating = True
@@ -448,8 +463,14 @@ class FramelessWindow(QMainWindow):
         self._keep_anim(self._geo_anim)
         self._geo_anim.start()
 
-    def _animate_geometry_bounce(self, target: QRect, dur: int | None = None, overshoot: float = 0.06,
-                                 curve_out=QEasingCurve.OutQuint, curve_back=QEasingCurve.OutBack):
+    def _animate_geometry_bounce(
+        self,
+        target: QRect,
+        dur: int | None = None,
+        overshoot: float = 0.06,
+        curve_out=QEasingCurve.OutQuint,
+        curve_back=QEasingCurve.OutBack,
+    ):
         dur = self._geo_ms if dur is None else dur
         start = self.geometry()
 
@@ -477,7 +498,7 @@ class FramelessWindow(QMainWindow):
         self._keep_anim(seq)
         seq.start()
 
-    def _animate_fade(self, start: float, end: float, after: Optional[callable] = None, dur: int | None = None,
+    def _animate_fade(self, start: float, end: float, after: Optional[Callable] = None, dur: int | None = None,
                       curve=QEasingCurve.OutCubic):
         dur = self._fade_ms if dur is None else dur
         if self._fade_anim and self._fade_anim.state() == QPropertyAnimation.Running:
@@ -492,14 +513,16 @@ class FramelessWindow(QMainWindow):
         self._keep_anim(self._fade_anim)
         self._fade_anim.start()
 
-    # ----------------------------- ações públicas -----------------------------
-    def minimize_with_fade(self):
-        """Shrink + fade (suave) → só então minimizar (robusto)."""
-        # Cancela anims concorrentes
+    # ================================================================= ações
+    def _stop_anims(self):
         if self._geo_anim and self._geo_anim.state() == QPropertyAnimation.Running:
             self._geo_anim.stop()
         if self._fade_anim and self._fade_anim.state() == QPropertyAnimation.Running:
             self._fade_anim.stop()
+
+    def minimize_with_fade(self):
+        """Shrink + fade (suave) → só então minimizar (robusto)."""
+        self._stop_anims()
 
         g = self.geometry()
         target_w = max(int(g.width() * 0.92), 200)
@@ -523,7 +546,6 @@ class FramelessWindow(QMainWindow):
             try:
                 self.showMinimized()
             finally:
-                # Garante retorno visual correto ao restaurar
                 self.setWindowOpacity(1.0)
                 self._end_heavy_anim()
 
@@ -537,21 +559,17 @@ class FramelessWindow(QMainWindow):
         self.showNormal(); self.raise_(); self.activateWindow()
         self.setWindowOpacity(0.0)
         self._animate_fade(0.0, 1.0, dur=max(180, self._fade_ms))
-        # micro-bounce no retorno
         g = self.geometry()
         self._animate_geometry_bounce(g, dur=max(200, self._geo_ms - 100), overshoot=0.035)
 
     def toggle_max_restore(self):
         """Alterna entre maximizado e restaurado com animação; avisa TitleBars do novo estado."""
-        # Evita conflito com animações de geometria já rodando
-        if self._geo_anim and self._geo_anim.state() == QPropertyAnimation.Running:
-            self._geo_anim.stop()
+        self._stop_anims()
 
         if not self._is_maximized:
             # Guardar geometria atual para restauração
             self._normal_geometry = self.geometry()
             target = self._available_rect()
-            # Bounce curto para não "escapar" da tela
             self._animate_geometry_bounce(
                 target,
                 overshoot=0.04,
@@ -560,10 +578,9 @@ class FramelessWindow(QMainWindow):
                 curve_back=QEasingCurve.OutBack
             )
             self._is_maximized = True
-            # Em modo maximizado, não exibir cursores de resize
-            self.unsetCursor()
+            self.unsetCursor()  # em modo max não mostramos cursores de resize
         else:
-            # Restaura para a geometria anterior ou um fallback seguro
+            # Restaura para a geometria anterior (ou fallback)
             target = self._normal_geometry if self._normal_geometry else QRect(
                 self.x() + 60, self.y() + 40,
                 max(900, self.width() - 120),
@@ -578,8 +595,8 @@ class FramelessWindow(QMainWindow):
             )
             self._is_maximized = False
 
-        # Notifica TitleBars conectados (se oferecerem setMaximized)
-        for tb in getattr(self, "_titlebars", []):
+        # Notifica TitleBars conectados
+        for tb in self._titlebars:
             if hasattr(tb, "setMaximized"):
                 try:
                     tb.setMaximized(self._is_maximized)
@@ -587,24 +604,20 @@ class FramelessWindow(QMainWindow):
                     pass
 
     def shrink_to(self, size: QSize, center: bool = True, easing=QEasingCurve.OutBack, dur: int | None = None):
+        """Encolhe suavemente até 'size' (opcionalmente centralizado)."""
         size = QSize(max(size.width(), 200), max(size.height(), 150))
+        g = self.geometry()
         if center:
-            g = self.geometry()
             nx = g.center().x() - size.width() // 2
             ny = g.center().y() - size.height() // 2
             target = QRect(nx, ny, size.width(), size.height())
         else:
-            g = self.geometry()
             target = QRect(g.x(), g.y(), size.width(), size.height())
         self._animate_geometry_bounce(target, dur=dur or max(200, self._geo_ms - 80), overshoot=0.05)
 
     def close_with_shrink_fade(self):
         """Shrink com InBack + fade; fecha ao terminar (robusto)."""
-        # Cancela anims concorrentes
-        if self._geo_anim and self._geo_anim.state() == QPropertyAnimation.Running:
-            self._geo_anim.stop()
-        if self._fade_anim and self._fade_anim.state() == QPropertyAnimation.Running:
-            self._fade_anim.stop()
+        self._stop_anims()
 
         g = self.geometry()
         target_w = max(int(g.width() * 0.6), 280)
@@ -628,7 +641,6 @@ class FramelessWindow(QMainWindow):
             try:
                 self.close()
             finally:
-                # Em casos raros (abort), garante estado coerente
                 self.setWindowOpacity(1.0)
                 self._end_heavy_anim()
 
@@ -637,9 +649,9 @@ class FramelessWindow(QMainWindow):
         self._keep_anim(group)
         group.start()
 
-    # ------------------------------ HELPERS UX --------------------------------
+    # ================================================================= helpers
     def _restore_from_max_at_cursor(self, global_cursor: QPoint):
-        """Restaura imediatamente do maximizado e posiciona mantendo a proporção do cursor (sem animação)."""
+        """Restaura do maximizado e posiciona mantendo a proporção do cursor (sem animação)."""
         avail = self._available_rect()
 
         base_w = self._normal_geometry.width() if self._normal_geometry else int(avail.width() * 0.7)
@@ -653,19 +665,17 @@ class FramelessWindow(QMainWindow):
         target = QRect(nx, ny, w, h)
 
         self._is_maximized = False
-        # Sem animação: define a geometria imediatamente
-        self.setGeometry(target)
-        # Atualiza o deslocamento de drag para continuar arrastando suave
-        self._drag_pos = global_cursor - target.topLeft()
+        self.setGeometry(target)  # sem animação
+        self._drag_pos = global_cursor - target.topLeft()  # continua arrastando suave
 
     def _handle_snap_under_cursor(self):
         avail = self._available_rect()
         g = self.frameGeometry()
         cursor = QCursor.pos()
 
-        near_left   = abs(cursor.x() - avail.left())   <= _SNAP_THRESHOLD
-        near_right  = abs(cursor.x() - avail.right())  <= _SNAP_THRESHOLD
-        near_top    = abs(cursor.y() - avail.top())    <= _SNAP_THRESHOLD
+        near_left   = abs(cursor.x() - avail.left())   <= _Fx.SNAP_THRESHOLD
+        near_right  = abs(cursor.x() - avail.right())  <= _Fx.SNAP_THRESHOLD
+        near_top    = abs(cursor.y() - avail.top())    <= _Fx.SNAP_THRESHOLD
 
         if near_top and not (near_left or near_right):
             self._normal_geometry = g
@@ -686,7 +696,7 @@ class FramelessWindow(QMainWindow):
             self._animate_geometry(r, easing=QEasingCurve.OutCubic)
             return
 
-    # ------------------------------ QoL --------------------------------------
+    # ================================================================= QoL
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape and self._resizing:
             self._resizing = False
@@ -699,28 +709,35 @@ class FramelessWindow(QMainWindow):
         super().resizeEvent(e)
 
 
+# =============================================================================
+#  Diálogo frameless
+# =============================================================================
 class FramelessDialog(FramelessWindow):
-    """Dialog modal baseado no FramelessWindow (com exec())"""
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
-        # comportamento de diálogo modal (sem barra nativa)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setWindowModality(Qt.ApplicationModal)
         self._result_code = QDialog.Rejected
-
-        # dimensionamento mínimo confortável para prompts
         self.setMinimumSize(360, 180)
 
-    # API de diálogo
+        # Política de centralização: "window" (padrão), "screen" ou "parent"
+        self._center_mode: str = "window"
+
+    # ------------------- API pública extra -------------------
+    def set_center_mode(self, mode: str):
+        self._center_mode = mode if mode in ("window", "screen", "parent") else "window"
+
+    # ------------------- Diálogo padrão (OK/Cancel) -------------------
     def accept(self):
+        """Fecha o diálogo reportando QDialog.Accepted, com animação."""
         self._result_code = QDialog.Accepted
-        # animação de saída já existente
         try:
             self.close_with_shrink_fade()
         except Exception:
             self.close()
 
     def reject(self):
+        """Fecha o diálogo reportando QDialog.Rejected, com animação."""
         self._result_code = QDialog.Rejected
         try:
             self.close_with_shrink_fade()
@@ -728,29 +745,78 @@ class FramelessDialog(FramelessWindow):
             self.close()
 
     def exec(self) -> int:
-        # mostra com um fadezinho (reaproveita showEvent do FramelessWindow)
+        # Garante um tamanho razoável antes de centralizar
+        if self.width() <= 1 or self.height() <= 1:
+            sh = self.sizeHint()
+            self.resize(sh if sh.isValid() else QSize(max(self.minimumWidth(), 360), max(self.minimumHeight(), 180)))
+        self._center_over_parent()
         self.show()
         loop = QEventLoop(self)
-        # quando fechar, quebra o loop
         self.destroyed.connect(loop.quit)
         loop.exec()
         return self._result_code
-    
+
+    # ------------------- Integração com TitleBar -------------------
     def connect_titlebar(self, titlebar_widget: QWidget):
         """Conecta a titlebar, mas mantém APENAS o botão de fechar visível."""
         super().connect_titlebar(titlebar_widget)
-
-        # Esconde botões que não queremos no diálogo
         for attr in ("btn_min", "btn_max", "_btn_settings"):
             if hasattr(titlebar_widget, attr):
                 try:
                     getattr(titlebar_widget, attr).hide()
                 except Exception:
                     pass
-    
+
+    # ------------------- Centralização -------------------
+    def _center_over_parent(self):
+        """Centraliza conforme a política (_center_mode)."""
+        try:
+            # 1) Tamanho útil
+            if self.width() <= 1 or self.height() <= 1:
+                sh = self.sizeHint()
+                self.resize(sh if sh.isValid() else QSize(max(self.minimumWidth(), 360), max(self.minimumHeight(), 180)))
+
+            # 2) Âncora (janela raiz, parent imediato, ou None)
+            anchor = None
+            if self._center_mode == "window":
+                anchor = self.window()  # top-level (AppShell)
+            elif self._center_mode == "parent":
+                anchor = self.parentWidget()
+
+            center_global = None
+            if anchor and isinstance(anchor, QWidget) and anchor.isVisible():
+                center_global = anchor.mapToGlobal(anchor.rect().center())
+
+            # 3) Tela alvo
+            screen = QGuiApplication.screenAt(center_global) if center_global else None
+            if not screen:
+                if anchor and anchor.windowHandle():
+                    screen = anchor.windowHandle().screen()
+                elif self.windowHandle():
+                    screen = self.windowHandle().screen()
+                else:
+                    screen = QGuiApplication.primaryScreen()
+
+            ag = screen.availableGeometry()
+
+            # 4) Centro final (da tela ou do anchor)
+            target_center = ag.center() if (self._center_mode == "screen" or center_global is None) else center_global
+            x = target_center.x() - self.width() // 2
+            y = target_center.y() - self.height() // 2
+
+            # clamp dentro da área visível
+            x = max(ag.left(),  min(x, ag.right()  - self.width()  + 1))
+            y = max(ag.top(),   min(y, ag.bottom() - self.height() + 1))
+            self.move(x, y)
+        except Exception:
+            pass
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        QTimer.singleShot(0, self._center_over_parent)
+
     def eventFilter(self, obj: QObject, ev):
-        # Consumir duplo-clique na titlebar (não maximiza em diálogos)
-        from PySide6.QtCore import QEvent
+        # Evita maximizar por duplo-clique em diálogos
         if obj in getattr(self, "_draggables", []) and ev.type() == QEvent.MouseButtonDblClick:
             return True
         return super().eventFilter(obj, ev)
