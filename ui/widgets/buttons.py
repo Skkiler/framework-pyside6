@@ -291,13 +291,23 @@ def command_button(
 ) -> PrimaryButton:
     btn = PrimaryButton(text, **size)
     payload = payload or {}
-    def on_click():
-        res = task_runner.run_task(command_name, payload)
-        if not res.get("ok", False):
-            QMessageBox.warning(btn, "Falha", str(res.get("error", "Erro desconhecido")))
-    btn.clicked.connect(on_click)
-    return btn
 
+    # se não tiver runner, já desabilita e mostra dica
+    if task_runner is None or not hasattr(task_runner, "run_task"):
+        btn.setEnabled(False)
+        btn.setToolTip("Sem task_runner associado a este botão.")
+    else:
+        def on_click():
+            try:
+                res = task_runner.run_task(command_name, payload)
+            except Exception as e:
+                QMessageBox.warning(btn, "Falha", f"Erro ao executar tarefa: {e}")
+                return
+            if not res.get("ok", False):
+                QMessageBox.warning(btn, "Falha", str(res.get("error", "Erro desconhecido")))
+        btn.clicked.connect(on_click)
+
+    return btn
 
 def confirm_command_button(
     text: str,
@@ -309,13 +319,23 @@ def confirm_command_button(
 ) -> PrimaryButton:
     btn = PrimaryButton(text, **size)
     payload = payload or {}
-    def on_click():
-        ans = QMessageBox.question(btn, "Confirmar", confirm_msg)
-        if ans == QMessageBox.Yes:
-            res = task_runner.run_task(command_name, payload)
-            if not res.get("ok", False):
-                QMessageBox.warning(btn, "Falha", str(res.get("error", "Erro")))
-    btn.clicked.connect(on_click)
+
+    if task_runner is None or not hasattr(task_runner, "run_task"):
+        btn.setEnabled(False)
+        btn.setToolTip("Sem task_runner associado a este botão.")
+    else:
+        def on_click():
+            ans = QMessageBox.question(btn, "Confirmar", confirm_msg)
+            if ans == QMessageBox.Yes:
+                try:
+                    res = task_runner.run_task(command_name, payload)
+                except Exception as e:
+                    QMessageBox.warning(btn, "Falha", f"Erro ao executar tarefa: {e}")
+                    return
+                if not res.get("ok", False):
+                    QMessageBox.warning(btn, "Falha", str(res.get("error", "Erro")))
+        btn.clicked.connect(on_click)
+
     return btn
 
 

@@ -1,21 +1,21 @@
 {
-    "vars": {
-    "bg_start": "#fdfdfd",
+  "vars": {
+    "bg_start": "#fcfdf9",
     "bg_end": "#e1eefa",
     "bg": "#fdfdfd",
-    "surface": "#ffffff",
+    "surface": "#eaeaea",
     "text": "#4c4c4c",
-    "input_bg": "#ffffff",
+    "text_hover": "#4c4c4c",
     "btn": "#e0e8f0",
     "btn_hover": "#f1e7c6",
     "btn_text": "#2f2f2f",
+    "hover": "#f1e7c6",
+    "accent": "#f1e7c6",
+    "input_bg": "#ffffff",
+    "box_border": "#67673d",
     "checkbox": "#fff098",
     "slider": "#b5dfff",
     "cond_selected": "#b5dfff",
-    "box_border": "#888888",
-    "hover": "#f1e7c6",
-    "text_hover": "#4c4c4c",
-    "window_bg": "#e1eefa",
-    "accent": "#f1e7c6"
-    }
+    "window_bg": "#e1eefa"
+  }
 }

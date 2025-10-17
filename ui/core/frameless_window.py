@@ -57,6 +57,11 @@ class FramelessWindow(QMainWindow):
         self._is_maximized = False
         self._was_minimized = self.isMinimized()
 
+        # --- NOVO: parâmetros de resize configuráveis ---
+        self._edges_enabled = True            # permite desligar resize pelas bordas
+        self._min_resize_w = 400              # mínimos usados no algoritmo de resize
+        self._min_resize_h = 300
+
         self._geo_anim: Optional[QPropertyAnimation] = None
         self._fade_anim: Optional[QPropertyAnimation] = None
         self._anim_refs: list[QObject] = []  # guarda refs para grupos/anim
@@ -158,6 +163,16 @@ class FramelessWindow(QMainWindow):
         if fade_ms is not None:
             self._fade_ms = max(80, int(fade_ms))
 
+    # --- NOVO: API pública para controle de resize ---
+    def set_edges_enabled(self, enabled: bool):
+        """Habilita/desabilita o resize pelas bordas/cantos."""
+        self._edges_enabled = bool(enabled)
+
+    def set_min_resize_size(self, w: int, h: int):
+        """Define o mínimo de resize usado pelo algoritmo interno (default 400x300)."""
+        self._min_resize_w = max(1, int(w))
+        self._min_resize_h = max(1, int(h))
+
     def setCentralWidget(self, w: QWidget) -> None:  # noqa: N802 (Qt API)
         """Insere o widget dado dentro do content() mantendo um layout limpo."""
         layout = self._content.layout()
@@ -219,13 +234,13 @@ class FramelessWindow(QMainWindow):
         return any((l, t, r, b))
 
     def _top_resize_hit(self, pos: QPoint) -> bool:
-        if self._is_maximized:
+        if self._is_maximized or not self._edges_enabled:
             return False
         return pos.y() <= max(_Fx.RESIZE_MARGIN, _Fx.TITLEBAR_DRAG_GAP)
 
     def _calc_edges(self, pos: QPoint) -> tuple[bool, bool, bool, bool]:
         """Retorna (left, top, right, bottom) se pos está em regiões de resize."""
-        if self._is_maximized:
+        if self._is_maximized or not self._edges_enabled:
             return (False, False, False, False)
 
         r = self.rect()
@@ -400,8 +415,9 @@ class FramelessWindow(QMainWindow):
         if bottom:
             h += delta.y()
 
-        minw = max(self.minimumWidth(), 400)
-        minh = max(self.minimumHeight(), 300)
+        # --- NOVO: use os mínimos configuráveis ---
+        minw = max(self.minimumWidth(),  self._min_resize_w)
+        minh = max(self.minimumHeight(), self._min_resize_h)
         w = max(w, minw)
         h = max(h, minh)
 
@@ -627,7 +643,12 @@ class FramelessWindow(QMainWindow):
         ny = g.center().y() - target_h // 2
         target = QRect(nx, ny, target_w, target_h)
 
-        geo = self._mk_geo_anim(g, target, max(180, self._geo_ms - 120), QEasingCurve.InBack)
+        geo = QPropertyAnimation(self, b"geometry")
+        geo.setDuration(max(180, self._geo_ms - 120))
+        geo.setStartValue(g)
+        geo.setEndValue(target)
+        geo.setEasingCurve(QEasingCurve.InBack)
+
         fade = QPropertyAnimation(self, b"windowOpacity")
         fade.setDuration(max(180, self._fade_ms))
         fade.setStartValue(1.0)
@@ -757,7 +778,7 @@ class FramelessDialog(FramelessWindow):
         self._loop.exec()
         self._loop = None
         return self._result_code
-    
+
     def closeEvent(self, e):
         try:
             if self._loop is not None and self._loop.isRunning():
