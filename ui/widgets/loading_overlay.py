@@ -114,7 +114,7 @@ class LoadingOverlay(QWidget):
                 QFrame#LoadingPanel {{
                     background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 {bg0}, stop:1 {bg1});
                     border: 1px solid rgba(255,255,255,0.10);
-                    border-radius: 12px;
+                    border-radius: 24px;
                 }}"""
             )
         elif background_mode == "transparent":
@@ -123,7 +123,7 @@ class LoadingOverlay(QWidget):
                 QFrame#LoadingPanel {
                     background: rgba(0,0,0,0.0);
                     border: 1px solid rgba(255,255,255,0.10);
-                    border-radius: 12px;
+                    border-radius: 24px;
                 }"""
             )
         else:
@@ -204,34 +204,82 @@ class LoadingOverlay(QWidget):
         if not par:
             return
         r = par.rect()
-        # Ajusta a geometria do OVERLAY para cobrir o parent
         self.setGeometry(QRect(r.left(), r.top(), r.width(), r.height()))
-        # E posiciona o painel com base no TAMANHO ATUAL do overlay
         self._reposition_panel_only()
         self._apply_scaled_size()
+        self._reposition_panel_only()
 
     def _reposition_panel_only(self):
         """Reposiciona somente o painel com base no tamanho atual do overlay."""
         r = self.rect()
         if r.isNull():
             return
-        pw = max(220, int(r.width() * 0.5))
-        ph = max(160, int(r.height() * 0.5))
-        px = (r.width() - pw) // 2
-        py = (r.height() - ph) // 2
-        self._panel.setGeometry(QRect(px, py, pw, ph))
+
+        side = self._ideal_panel_side()
+        px = (r.width() - side) // 2
+        py = (r.height() - side) // 2
+        self._panel.setGeometry(QRect(px, py, side, side))
 
     def _apply_scaled_size(self):
         """Mantém proporção do GIF: ocupa ~60% do menor lado do painel."""
         if not self._movie:
             return
-        w = self._panel.width()
-        h = self._panel.height()
-        if w <= 0 or h <= 0:
+        side = min(self._panel.width(), self._panel.height())
+        if side <= 0:
             return
-        target = max(32, int(min(w, h) * 0.60))
+
+        # Aumenta a proporção do GIF (de 0.48 → 0.65)
+        target = int(side * 0.65)
+        target = max(64, min(target, 256))  # aumenta limites mínimo/máximo
         self._movie.setScaledSize(QSize(target, target))
         self._gif_label.setFixedSize(target, target)
+
+        lay = self._panel.layout()
+        if lay:
+            lay.activate()
+
+    def _ideal_panel_side(self) -> int:
+
+        par = self.parentWidget()
+        if not par:
+            return 240
+
+        pr = par.rect()
+        if pr.isNull():
+            return 240
+
+        cap = int(min(pr.width(), pr.height()) * 0.56)
+        cap = max(cap, 160)  # nunca cair demais se o parent for pequeno
+
+        hint_w, hint_h = self._content_hint(max_text_width=int(min(pr.width(), pr.height()) * 0.42))
+
+        base = max(hint_w, hint_h)
+        side = base + 8
+
+        side = max(140, side)
+        side = min(cap, side)
+        return side
+
+
+    def _content_hint(self, max_text_width: int = 280) -> Tuple[int, int]:
+
+        self._text.setWordWrap(True)
+        self._text.setMaximumWidth(max(180, max_text_width))
+
+
+        if self._movie:
+            side_guess = max(48, min(int(max_text_width * 0.5), 160))
+            self._movie.setScaledSize(QSize(side_guess, side_guess))
+            self._gif_label.setFixedSize(side_guess, side_guess)
+
+        lay = self._panel.layout()
+        if lay:
+            lay.activate()
+            hint = lay.sizeHint()
+            return hint.width(), hint.height()
+
+        return 220, 160
+
 
     # bloqueia somente a área do conteúdo (parent)
     def mousePressEvent(self, e):  e.accept() if self._block_input else e.ignore()

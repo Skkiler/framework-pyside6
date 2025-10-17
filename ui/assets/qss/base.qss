@@ -53,7 +53,6 @@ QWidget, QLabel { color: {text}; }
 #SidePanel {
   background: {content_bg};
   border-right: 1px solid {box_border};
-  border-top-left-radius: 12px;
   border-bottom-left-radius: 12px;
   border-top-right-radius: 8px;
 }
@@ -124,7 +123,7 @@ QListWidget::item:selected{
 #SidePanel QListWidget::item:selected {
   background: {cond_selected};
   color: {text};
-  border-radius: 8px;
+  border-radius: 6px;
 }
 
 /* QComboBox (fechado) */
@@ -371,7 +370,7 @@ QWidget#LoadingOverlay { background: transparent; }
 QFrame#LoadingPanel {
   background: {loading_overlay_bg};
   border: 1px solid {box_border};
-  border-radius: 12px;
+  border-radius: 24px;
 }
 QFrame#LoadingPanel QLabel { color: {btn_text}; }
 
@@ -379,15 +378,22 @@ QFrame#LoadingPanel QLabel { color: {btn_text}; }
    SETTINGS SIDEBAR (custom)
    ========================= */
 #SettingsSidePanel {
-  background: rgba(0, 0, 0, 0.35);
-  border-left: 1px solid palette(mid);
-  border-top-left-radius: 10px;
+  background: {loading_overlay_bg};
+  border-left: 1px solid {box_border};
+  border-bottom-right-radius: 12px;
+  border-top-left-radius: 8px;
 }
 #SettingsSidePanelHeader {
-  background: rgba(0, 0, 0, 0.18);
+  background:{content_bg};
+  color: {text};
   border-bottom: 1px solid palette(mid);
   border-top-left-radius: 10px;
 }
+#SettingsSidePanelHeader QToolButton {
+  color: {text};
+  background: transparent;
+}
+#SettingsSidePanelHeader QToolButton:hover { background: {cond_selected}; }
 
 /* Botão da engrenagem na titlebar */
 #TitlebarSettingsButton {

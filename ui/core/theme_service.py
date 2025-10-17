@@ -55,9 +55,9 @@ def _make_tokens(base_vars: Dict[str, Any]) -> Dict[str, Any]:
     Gera tokens finais (inclui derivados sem poluir o original).
     """
     tokens = dict(base_vars)  # copy
-    checkbox_hex = tokens.get("checkbox")
-    if isinstance(checkbox_hex, str) and checkbox_hex.startswith("#"):
-        tokens["loading_overlay_bg"] = _rgba_from_hex(checkbox_hex, 0.05)
+    surface_hex = tokens.get("surface")
+    if isinstance(surface_hex, str) and surface_hex.startswith("#"):
+        tokens["loading_overlay_bg"] = _rgba_from_hex(surface_hex, 0.05)
     else:
         tokens["loading_overlay_bg"] = "rgba(255,255,255,0.12)"
     return tokens
