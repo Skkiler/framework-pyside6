@@ -51,6 +51,99 @@ def _section(parent: QWidget, title: str) -> QFrame:
     return frame
 
 
+# ============================================================
+# Subpágina 1: home/ferramentas
+# ============================================================
+class HomeToolsPage(QWidget):
+    """
+    Subpágina direta de 'home' (rota: home/ferramentas).
+    Mostra um texto e um botão para abrir a sub-subpágina 'detalhes'.
+    """
+    def __init__(self):
+        super().__init__()
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(12)
+
+        sec = _section(self, "Ferramentas (Subpágina)")
+        lay = sec._content.layout()  # type: ignore[attr-defined]
+        info = QLabel("Você está em: home / ferramentas", self)
+        info.setWordWrap(True)
+        lay.addWidget(info)
+
+        btn_go = Controls.Button("Ir para Detalhes (sub-subpágina)", self)
+        btn_go.clicked.connect(lambda: self._go("home/ferramentas/detalhes"))
+        lay.addWidget(btn_go)
+
+        # opcional: botão de voltar para home
+        btn_back = Controls.Button("Voltar para Home", self)
+        btn_back.clicked.connect(lambda: self._go("home"))
+        lay.addWidget(btn_back)
+
+        root.addWidget(sec)
+
+    def _go(self, path: str):
+        win = self.window()
+        try:
+            r = getattr(win, "router", None)
+            if r:
+                r.go(path)
+        except Exception as e:
+            print("[WARN] navegação falhou:", e)
+
+
+def build_home_tools(*args, **kwargs) -> QWidget:
+    """Factory para o registry/manifesto — rota: home/ferramentas"""
+    return HomeToolsPage()
+
+
+# ============================================================
+# Subpágina 2: home/ferramentas/detalhes
+# ============================================================
+class HomeToolsDetailsPage(QWidget):
+    """
+    Sub-subpágina dentro de 'home/ferramentas' (rota: home/ferramentas/detalhes).
+    """
+    def __init__(self):
+        super().__init__()
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(12)
+
+        sec = _section(self, "Detalhes das Ferramentas (Sub-subpágina)")
+        lay = sec._content.layout()  # type: ignore[attr-defined]
+        info = QLabel("Você está em: home / ferramentas / detalhes", self)
+        info.setWordWrap(True)
+        lay.addWidget(info)
+
+        btn_up = Controls.Button("Voltar para Ferramentas", self)
+        btn_up.clicked.connect(lambda: self._go("home/ferramentas"))
+        lay.addWidget(btn_up)
+
+        btn_home = Controls.Button("Voltar para Home", self)
+        btn_home.clicked.connect(lambda: self._go("home"))
+        lay.addWidget(btn_home)
+
+        root.addWidget(sec)
+
+    def _go(self, path: str):
+        win = self.window()
+        try:
+            r = getattr(win, "router", None)
+            if r:
+                r.go(path)
+        except Exception as e:
+            print("[WARN] navegação falhou:", e)
+
+
+def build_home_tools_details(*args, **kwargs) -> QWidget:
+    """Factory para o registry/manifesto — rota: home/ferramentas/detalhes"""
+    return HomeToolsDetailsPage()
+
+
+# ============================================================
+# Página Home (raiz)
+# ============================================================
 class HomePage(QWidget):
     def __init__(self, task_runner):
         super().__init__()
@@ -63,6 +156,22 @@ class HomePage(QWidget):
         hero_lay = hero._content.layout()  # type: ignore[attr-defined]
         hero_lay.addWidget(QLabel("Esta é a Home. Abaixo você encontra exemplos prontos de botões e toasts."))
         root.addWidget(hero)
+
+        # =====================================================
+        # Seção: Navegação (subpáginas de teste)
+        # =====================================================
+        nav = _section(self, "Navegação (Subpáginas de Teste)")
+        nav_lay = nav._content.layout()  # type: ignore[attr-defined]
+
+        btn_sub = Controls.Button("Abrir Ferramentas (home/ferramentas)", self)
+        btn_sub.clicked.connect(lambda: self._go("home/ferramentas"))
+        nav_lay.addWidget(btn_sub)
+
+        btn_sub2 = Controls.Button("Abrir Detalhes (home/ferramentas/detalhes)", self)
+        btn_sub2.clicked.connect(lambda: self._go("home/ferramentas/detalhes"))
+        nav_lay.addWidget(btn_sub2)
+
+        root.addWidget(nav)
 
         # =====================================================
         # Seção: Ações principais (mantendo seus botões)
@@ -197,6 +306,16 @@ class HomePage(QWidget):
                 QTimer.singleShot(1000, tick)
 
         QTimer.singleShot(1000, tick)
+
+    def _go(self, path: str):
+        """Navega usando o Router do AppShell, se disponível."""
+        win = self.window()
+        try:
+            r = getattr(win, "router", None)
+            if r:
+                r.go(path)
+        except Exception as e:
+            print("[WARN] navegação falhou:", e)
 
     # ------------------------------------------------------------------
     @staticmethod

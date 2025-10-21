@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Iterable
 import json
 
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QShortcut, QKeySequence
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QApplication
 from PySide6.QtCore import QFileSystemWatcher, QTimer
 
@@ -20,6 +20,7 @@ from ui.widgets.overlay_sidebar import OverlaySidePanel
 from ui.services.theme_repository_json import JsonThemeRepository
 from ui.widgets.titlebar import TitleBar
 from ui.widgets.settings_sidebar import SettingsSidePanel
+from ui.core.utils.factories import call_with_known_kwargs
 
 from app.pages.settings import build as build_settings_page
 
@@ -44,7 +45,8 @@ class AppShell(FramelessWindow):
         self.cache_dir = ensure_dir(self.assets_dir / "cache")
         self.settings = settings
 
-        self.router = Router()
+        # Router com histórico (limit 100)
+        self.router = Router(history_limit=100)
 
         self.theme_service = ThemeService(
             repo=JsonThemeRepository(themes_dir),
@@ -57,6 +59,9 @@ class AppShell(FramelessWindow):
 
         central = self._build_central(title)
         self.setCentralWidget(central)
+
+        # Conecta sinais do Router
+        self._wire_router_events()
 
         # Sincroniza ícone com o tema (titlebar + taskbar)
         self._setup_theme_icon_sync()
@@ -76,6 +81,7 @@ class AppShell(FramelessWindow):
 
         # Dicionário de rotas -> labels (preenchido ao registrar páginas)
         self._page_labels: dict[str, str] = {}
+        self._all_pages = []  # type: list
 
     # ---------------------------------------------------------
     #  Montagem da UI
@@ -98,6 +104,7 @@ class AppShell(FramelessWindow):
 
         # Topbar (inicialmente sem título; será atualizado conforme página)
         self.topbar = TopBar(onHamburgerClick=self._toggle_sidebar, title=None)
+        self.topbar.breadcrumbClicked.connect(self._go)
         root_v.addWidget(self.topbar)
 
         # Router (conteúdo principal)
@@ -106,6 +113,21 @@ class AppShell(FramelessWindow):
         content.setSpacing(0)
         root_v.addLayout(content)
         content.addWidget(self.router)
+
+        # --- Atalhos globais ---
+        try:
+            sc_back = QShortcut(QKeySequence("Alt+Left"), self)
+            sc_back.activated.connect(self.router.go_back)
+            sc_fwd = QShortcut(QKeySequence("Alt+Right"), self)
+            sc_fwd.activated.connect(self.router.go_forward)
+        except Exception as e:
+            print("[WARN] atalhos back/forward falharam:", e)
+
+        try:
+            sc_qk = QShortcut(QKeySequence("Ctrl+K"), self)
+            sc_qk.activated.connect(self._open_quick_open)
+        except Exception as e:
+            print("[WARN] atalho Ctrl+K falhou:", e)
 
         return central
 
@@ -118,12 +140,12 @@ class AppShell(FramelessWindow):
         if show_in_sidebar:
             self.sidebar.add_page(route, label or route)
 
-        # Guarda o label (para exibir na TopBar)
+        # Guarda o label (para exibir na TopBar e breadcrumb)
         self._page_labels[route] = label or route
 
     def register_pages(self, specs: Iterable, *, task_runner=None):
         """Registra páginas a partir de uma lista de PageSpecs."""
-        from .utils.factories import call_with_known_kwargs
+        self._all_pages = list(specs)
         for spec in specs:
             widget = call_with_known_kwargs(
                 spec.factory,
@@ -136,7 +158,7 @@ class AppShell(FramelessWindow):
     #  Inicialização (tema + página inicial)
     # ---------------------------------------------------------
     def start(self, first_route: str, default_theme: str = "Dracula"):
-        """Aplica o tema e navega para a primeira página."""
+        """Aplica o tema e navega para a primeira página (respeitando última rota persistida)."""
         chosen = self.theme_service.load_selected_from_settings() or default_theme
         avail = self.theme_service.available()
         if avail:
@@ -146,16 +168,23 @@ class AppShell(FramelessWindow):
                 persist=False,
             )
 
-        # Navega para a página inicial
+        # Tenta restaurar última rota persistida
+        try:
+            last_route = self.settings.get("nav.last_route")
+            if isinstance(last_route, str) and last_route in self.router._pages:
+                first_route = last_route
+        except Exception:
+            pass
+
+        # Navega para a página inicial/recuperada
         self.router.go(first_route)
 
-        # Define o título da TopBar como o da página inicial
+        # Define o título + breadcrumb na TopBar e persiste last_route
+        self._update_topbar_for_route(first_route)
         try:
-            label = self._page_labels.get(first_route, first_route)
-            if hasattr(self.topbar, "set_title"):
-                self.topbar.set_title(label)
-        except Exception as e:
-            print(f"[WARN] Falha ao definir título inicial da TopBar: {e}")
+            self.settings.set("nav.last_route", first_route)
+        except Exception:
+            pass
 
     # ---------------------------------------------------------
     #  Ações simples
@@ -170,14 +199,64 @@ class AppShell(FramelessWindow):
         self.sidebar.toggle()
 
     def _go(self, route: str):
-        """Troca de rota e atualiza o título da TopBar."""
+        """Troca de rota e atualiza TopBar/breadcrumb + persistência."""
         self.router.go(route)
+        self._update_topbar_for_route(route)
         try:
-            label = self._page_labels.get(route, route)
-            if hasattr(self.topbar, "set_title"):
-                self.topbar.set_title(label)
+            self.settings.set("nav.last_route", route)
+        except Exception:
+            pass
+
+    # ---------------------- Router wiring / Topbar helpers ----------------------
+
+    def _wire_router_events(self):
+        """Conecta eventos do Router para manter TopBar e persistência em sincronia."""
+        try:
+            self.router.routeChanged.connect(self._on_route_changed)
         except Exception as e:
-            print("[WARN] Falha ao atualizar título da TopBar:", e)
+            print("[WARN] não consegui conectar routeChanged:", e)
+
+    def _on_route_changed(self, path: str, params: dict):
+        """Atualiza UI/persistência quando a rota muda (back/forward/go)."""
+        self._update_topbar_for_route(path)
+        try:
+            self.settings.set("nav.last_route", path)
+        except Exception:
+            pass
+
+    def _update_topbar_for_route(self, path: str):
+        """Atualiza título e breadcrumb simples na TopBar."""
+        # Título: label registrado para a rota (fallback = último segmento humanizado)
+        label = self._page_labels.get(path)
+        if not label:
+            label = path.split("/")[-1].replace("-", " ").title()
+        if hasattr(self.topbar, "set_title"):
+            self.topbar.set_title(label)
+
+        # Breadcrumb: partes acumuladas
+        parts = []
+        acc = []
+        for seg in (path or "").split("/"):
+            if not seg:
+                continue
+            acc.append(seg)
+            acc_path = "/".join(acc)
+            seg_label = self._page_labels.get(acc_path) or seg.replace("-", " ").title()
+            parts.append((seg_label, acc_path))
+
+        if hasattr(self.topbar, "set_breadcrumb"):
+            self.topbar.set_breadcrumb(parts if len(parts) > 1 else None)
+
+    def _open_quick_open(self):
+        """Abre Quick Open (Ctrl+K) frameless, modal e estilizado pelo base.qss."""
+        try:
+            from ui.dialogs.quick_open import QuickOpenDialog
+            pages = getattr(self, "_all_pages", []) or []
+            dlg = QuickOpenDialog(pages, parent=self)
+            dlg.routeChosen.connect(self._go)
+            dlg.exec()  # modal real com animação (FramelessDialog)
+        except Exception as e:
+            print("[WARN] QuickOpen indisponível:", e)
 
     # ---------------------- ÍCONE DO APP SINCRONIZADO COM TEMA ----------------------
 

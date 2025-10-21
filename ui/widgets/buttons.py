@@ -3,11 +3,11 @@
 from __future__ import annotations
 from typing import Dict, Any, Optional, Callable
 
-from PySide6.QtCore import QEasingCurve, QVariantAnimation, Qt, QSize, QRectF, Property
-from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen, QBrush
+from PySide6.QtCore import QEasingCurve, QVariantAnimation, Qt, QSize, QRectF, Property, Signal
+from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen, QBrush, QMouseEvent, QCursor
 from PySide6.QtWidgets import (
     QPushButton, QMessageBox, QGraphicsDropShadowEffect,
-    QCheckBox, QComboBox, QLineEdit, QToolButton
+    QCheckBox, QComboBox, QLineEdit, QToolButton, QLabel
 )
 
 # ---------- autosize util ----------
@@ -20,6 +20,49 @@ def _autosize_for_text(widget: QPushButton, pad_x: int = 16, pad_y: int = 7, min
     w = tw + iw + gap + pad_x * 2
     h = max(min_h, max(fm.height() + pad_y * 2, ih + pad_y * 2))
     return QSize(w, h)
+
+
+# ============================================================
+# LinkLabel — parece texto, mas é clicável; troca cor no hover via QSS
+# ============================================================
+class LinkLabel(QLabel):
+    """
+    Rótulo clicável, estilo “texto”. Não tem moldura, padding nem fundo.
+    - Usa cursor de mão.
+    - Emite `clicked` no mouse release com botão esquerdo.
+    - Seta a propriedade dinâmica `hover` True/False para o QSS controlar cor.
+    Exemplo de QSS:
+        #BreadcrumbLink { color: palette(window-text); }
+        #BreadcrumbLink[hover="true"] { color: @accent; }   // ou sua var de hover
+        #BreadcrumbLink[current="true"] { color: palette(mid); }
+    """
+    clicked = Signal()
+
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(text, parent)
+        self.setCursor(QCursor(Qt.PointingHandCursor))
+        self.setTextInteractionFlags(Qt.NoTextInteraction)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+        self.setProperty("hover", False)
+
+    def enterEvent(self, e):
+        self.setProperty("hover", True)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self.setProperty("hover", False)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        super().leaveEvent(e)
+
+    def mouseReleaseEvent(self, e: QMouseEvent):
+        if e.button() == Qt.LeftButton:
+            self.clicked.emit()
+            e.accept()
+            return
+        super().mouseReleaseEvent(e)
 
 
 # ============================================================
@@ -107,16 +150,7 @@ class PrimaryButton(HoverButton):
 class ToggleSwitch(QCheckBox):
     """
     ToggleSwitch animado e tematizável via QSS.
-
-    - Todas as cores podem ser definidas no base.qss com:
-        ToggleSwitch {
-          qproperty-offBg:    {bg_end};
-          qproperty-offKnob:  {bg_start};
-          qproperty-onBg:     {slider};
-          qproperty-onKnob:   {checkbox};
-        }
     """
-
     def __init__(self, parent=None, *, width: int = 34, height: int = 18):
         super().__init__(parent)
         self.setCursor(Qt.PointingHandCursor)
@@ -137,32 +171,32 @@ class ToggleSwitch(QCheckBox):
 
         # Cores padrão (caso não definidas via qproperty)
         pal = self.palette()
-        self._off_bg   = pal.dark().color()       # fundo trilho OFF
-        self._off_knob = pal.window().color()     # botão OFF
-        self._on_bg    = pal.highlight().color()  # fundo trilho ON
-        self._on_knob  = QColor(255, 255, 255)    # botão ON
+        self._off_bg   = pal.dark().color()
+        self._off_knob = pal.window().color()
+        self._on_bg    = pal.highlight().color()
+        self._on_knob  = QColor(255, 255, 255)
 
     # ---------- QPropertys para QSS ----------
     def getOffBg(self): return self._off_bg
-    def setOffBg(self, c): 
+    def setOffBg(self, c):
         if c: self._off_bg = QColor(c)
         self.update()
     offBg = Property(QColor, getOffBg, setOffBg)
 
     def getOffKnob(self): return self._off_knob
-    def setOffKnob(self, c): 
+    def setOffKnob(self, c):
         if c: self._off_knob = QColor(c)
         self.update()
     offKnob = Property(QColor, getOffKnob, setOffKnob)
 
     def getOnBg(self): return self._on_bg
-    def setOnBg(self, c): 
+    def setOnBg(self, c):
         if c: self._on_bg = QColor(c)
         self.update()
     onBg = Property(QColor, getOnBg, setOnBg)
 
     def getOnKnob(self): return self._on_knob
-    def setOnKnob(self, c): 
+    def setOnKnob(self, c):
         if c: self._on_knob = QColor(c)
         self.update()
     onKnob = Property(QColor, getOnKnob, setOnKnob)
@@ -231,24 +265,21 @@ class ToggleSwitch(QCheckBox):
 
 
 # ============================================================
-# InputList – topo arredondado; popup com base arredondada
-# (usa QSS global via propriedades/nomes, sem tokens no Python)
+# InputList
 # ============================================================
 class InputList(QComboBox):
     def __init__(self, parent=None):
         super().__init__(parent)
-        # QSS global: QComboBox[shape="top-rounded"] {...}
         self.setProperty("shape", "top-rounded")
 
     def showPopup(self):
         super().showPopup()
-        # dá um nome para o popup e deixa o QSS global cuidar
         view = self.view()
         view.setObjectName("InputListPopup")
 
 
 # ============================================================
-# CheckBoxControl / TextInput (simples, respeitam o QSS global)
+# CheckBoxControl / TextInput
 # ============================================================
 class CheckBoxControl(QCheckBox):
     def __init__(self, text: str = "", parent=None):
@@ -263,7 +294,7 @@ class TextInput(QLineEdit):
         self.setMinimumHeight(30)
 
 # ============================================================
-# IconButton – QToolButton enxuto para ícones/emoji (hambúrguer, voltar, etc)
+# IconButton
 # ============================================================
 class IconButton(QToolButton):
 
@@ -275,9 +306,7 @@ class IconButton(QToolButton):
         self.setAutoRaise(True)
         self.setCursor(Qt.PointingHandCursor)
         self.setMinimumSize(28, 28)
-        self.setProperty("variant", "ghost")  # pega estilo "ghost" se desejar
-        # deixa cantos arredondados (o QSS já cuida, mas garantimos hit-area)
-        self.setStyleSheet(self.styleSheet())  # noop, só pra já “sujar” se precisar
+        self.setProperty("variant", "ghost")
 
 # ============================================================
 # Helpers (como você já usava)
@@ -292,7 +321,6 @@ def command_button(
     btn = PrimaryButton(text, **size)
     payload = payload or {}
 
-    # se não tiver runner, já desabilita e mostra dica
     if task_runner is None or not hasattr(task_runner, "run_task"):
         btn.setEnabled(False)
         btn.setToolTip("Sem task_runner associado a este botão.")
@@ -349,9 +377,10 @@ def route_button(text: str, goto: Callable[[], None], **size) -> PrimaryButton:
 # Consolidador para import fácil
 # ============================================================
 class Controls:
-    Toggle    = ToggleSwitch
-    InputList = InputList
-    Button    = PrimaryButton
-    CheckBox  = CheckBoxControl
-    TextInput = TextInput
+    Toggle     = ToggleSwitch
+    InputList  = InputList
+    Button     = PrimaryButton
+    CheckBox   = CheckBoxControl
+    TextInput  = TextInput
     IconButton = IconButton
+    LinkLabel  = LinkLabel

@@ -1,4 +1,4 @@
-# ui/pages/registry.py
+# app/pages/registry.py
 
 from __future__ import annotations
 
@@ -63,7 +63,6 @@ def _safe_import(module_name: str) -> Any | None:
 
 
 def _infer_route_from_module_name(module_name: str) -> str:
-
     last = module_name.split(".")[-1]
     if last.endswith("_page"):
         last = last[:-5]
@@ -71,7 +70,6 @@ def _infer_route_from_module_name(module_name: str) -> str:
 
 
 def _discover_from_module(module) -> List[PageSpec]:
-
     specs: List[PageSpec] = []
     if not module:
         return specs
@@ -121,8 +119,7 @@ def _resolve_factory(module_name: str, func_name: str) -> Callable[..., QWidget]
     return None
 
 
-def _try_infer_module_from_route(route: str, base_pkg: str = "ui.pages") -> list[str]:
-
+def _try_infer_module_from_route(route: str, base_pkg: str = "app.pages") -> list[str]:
     dotted = route.replace("/", ".").replace("-", "_")
     cands = [
         f"{base_pkg}.{dotted}_page",
@@ -142,7 +139,6 @@ JsonLike = Union[dict, list, str, int, float, bool, None]
 
 
 def _coerce_manifest_items(data: JsonLike) -> List[dict]:
-
     items: List[dict] = []
 
     # Caso mais comum: lista
@@ -166,7 +162,7 @@ def _coerce_manifest_items(data: JsonLike) -> List[dict]:
         if any(k in data for k in ("route", "factory", "module", "label", "sidebar", "order")):
             return [data]
         # Mapa de rotas:
-        # { "home": "ui.pages.home_page:build", "settings": {"module":"...", "factory":"build"} }
+        # { "home": "app.pages.home_page:build", "settings": {"module":"...", "factory":"build"} }
         for route, spec in data.items():
             if isinstance(spec, str):
                 if ":" in spec:
@@ -187,7 +183,6 @@ def _coerce_manifest_items(data: JsonLike) -> List[dict]:
 
 
 def load_from_manifest(manifest_path: Path) -> List[PageSpec]:
-
     specs: List[PageSpec] = []
     if not manifest_path.exists():
         print(f"[INFO] Manifesto não encontrado: {manifest_path}")
@@ -235,7 +230,6 @@ def load_from_manifest(manifest_path: Path) -> List[PageSpec]:
 
                 # 2) Se não veio módulo, tentar deduzir pelo route
                 if not factory:
-                    # se ainda não temos route, não há como inferir módulo — fica para o próximo item
                     if not route:
                         print(f"[WARN] Item do manifesto com 'factory'='{factory_ref}' mas sem 'module' e sem 'route'. Ignorando.")
                         continue
@@ -273,11 +267,10 @@ def load_from_manifest(manifest_path: Path) -> List[PageSpec]:
 
 
 # ============================================================
-#  Auto-discovery de páginas (ui.pages.*)
+#  Auto-discovery de páginas (app.pages.*)
 # ============================================================
 
-def discover_pages(package: str = "ui.pages") -> List[PageSpec]:
-
+def discover_pages(package: str = "app.pages") -> List[PageSpec]:
     specs: List[PageSpec] = []
     try:
         pkg = importlib.import_module(package)
@@ -287,7 +280,6 @@ def discover_pages(package: str = "ui.pages") -> List[PageSpec]:
                 continue
             found = _discover_from_module(module)
             if not found:
-                # Só avisa se o nome do módulo parecer semanticamente uma página
                 last = module_name.split(".")[-1]
                 looks_like_page = last.endswith("_page") or last in {"home", "settings", "about", "dashboard"}
                 if looks_like_page and not callable(getattr(module, "build", None)):
@@ -303,7 +295,6 @@ def discover_pages(package: str = "ui.pages") -> List[PageSpec]:
 # ============================================================
 
 def get_all_pages(manifest_path: Optional[Path] = None) -> List[PageSpec]:
-
     manifest_specs = load_from_manifest(manifest_path) if manifest_path and manifest_path.exists() else []
     auto_specs = discover_pages()
     by_route = {s.route: s for s in auto_specs}
@@ -317,7 +308,7 @@ def get_all_pages(manifest_path: Optional[Path] = None) -> List[PageSpec]:
 # ============================================================
 
 if __name__ == "__main__":
-    print("🔍 Descobrindo páginas em ui.pages...")
+    print("🔍 Descobrindo páginas em app.pages...")
     found = discover_pages()
     for s in found:
         print(f" - {s.route:20} | label={s.label:20} | sidebar={s.sidebar} | order={s.order}")

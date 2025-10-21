@@ -9,6 +9,7 @@
   font-family: 'Segoe UI', Arial, sans-serif;
   font-size: 12px;
   border-radius: 8px;
+  border: 1px solid {box_border};
 }
 
 /* Conteúdo deve ser transparente para herdar do frame */
@@ -448,4 +449,66 @@ QMenu::item:selected {
   background: {surface};
   border: 1px solid {box_border};
   border-radius: 6px;
+}
+
+/* container */
+#TopBarBreadcrumbContainer {
+  /* sem padding extra; o HBox já cuida do espaçamento */
+}
+
+/* link “texto” */
+#BreadcrumbLink {
+  color: palette(window-text);
+}
+#BreadcrumbLink[hover="true"] {
+  color: {hover};           /* sua cor de hover */
+  text-decoration: none;    /* opcional */
+}
+
+/* atual (não clicável) */
+#BreadcrumbCurrent {
+  color: palette(mid);
+  font-weight: 500;         /* opcional */
+}
+
+/* separador */
+#BreadcrumbSeparator {
+  color: palette(mid);
+}
+
+/* ===== Quick Open: lista estilizada com borda e seleção tipo botão ===== */
+
+/* Remover outlines/focus nativo que gera traço/retícula esquisita */
+QListView, QListView::item { outline: 0; }
+
+/* Caixa da lista do Quick Open */
+#QuickOpenList {
+  background: {surface};
+  border: 1px solid {box_border};     /* << contorno da caixa da lista */
+  border-radius: 10px;
+  padding: 4px;
+}
+
+#QuickOpenList::item {
+  padding: 8px 10px;
+  margin: 3px 4px;
+  border-radius: 8px;
+  border: none;
+}
+
+/* Hover suave */
+#QuickOpenList::item:hover {
+  background: {hover};
+  color: {text};
+  border: none;
+}
+
+/* Seleção com cores de botão (nada de “traço rosinha”) */
+#QuickOpenList::item:selected,
+#QuickOpenList::item:selected:active,
+#QuickOpenList::item:selected:!active {
+  background: {btn};          /* << cor de botão */
+  color: {btn_text};          /* << texto do botão */
+  border: none;               /* remove qualquer focus/linha */
+  border-radius: 8px;
 }
