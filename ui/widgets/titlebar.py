@@ -4,24 +4,31 @@ from __future__ import annotations
 from typing import Optional, Union
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal, QPoint, QSize, QRect, QEvent
+from PySide6.QtCore import Qt, Signal, QPoint, QSize, QTimeLine, QTimer
 from PySide6.QtGui import QPixmap, QIcon, QPainter
 from PySide6.QtWidgets import QWidget, QLabel, QHBoxLayout, QPushButton, QSizePolicy
 
 
-# ---------- Widget de ícone à prova de HiDPI / frameless ----------
+# ---------- Widget de ícone com animação (cross-fade) à prova de HiDPI ----------
+
 class IconWidget(QWidget):
     def __init__(self, icon: Optional[Union[str, QPixmap, QIcon]] = None,
                  size: int = 20, parent: QWidget | None = None):
         super().__init__(parent)
         self._icon_size = size
         self._icon: Optional[QIcon] = self._normalize(icon)
+        self._old_icon: Optional[QIcon] = None
+        self._anim: Optional[QTimeLine] = None
+        self._progress: float = 1.0  # 1.0 = ícone atual totalmente visível
+        self._fade_duration_ms: int = 240  # mais suave; ajuste se quiser
+
         self.setObjectName("TitleBarAppIcon")
         self.setFixedSize(self._icon_size, self._icon_size)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
+    # --------- Helpers ---------
     def _normalize(self, icon: Optional[Union[str, QPixmap, QIcon]]) -> Optional[QIcon]:
-        if not icon:
+        if icon is None:
             win = self.window()
             if win is not None and not win.windowIcon().isNull():
                 return win.windowIcon()
@@ -30,39 +37,130 @@ class IconWidget(QWidget):
             return icon
         if isinstance(icon, QPixmap):
             return QIcon(icon)
-        p = Path(str(icon))
-        return QIcon(str(p)) if p.exists() else None
+        s = str(icon)
+        p = Path(s)
+        if p.exists():
+            return QIcon(str(p))
+        tmp = QIcon(s)  # aceita também ":/recurso"
+        return tmp if not tmp.isNull() else None
 
-    def setIcon(self, icon: Optional[Union[str, QPixmap, QIcon]]):
-        self._icon = self._normalize(icon)
+    def setFadeDuration(self, ms: int):
+        self._fade_duration_ms = max(60, int(ms))
+
+    # --------- API ---------
+    def setIcon(self, icon: Optional[Union[str, QPixmap, QIcon]], *,
+                animate: bool = True, duration_ms: Optional[int] = None):
+        new_icon = self._normalize(icon)
+        if (self._icon is None or self._icon.isNull()) and (new_icon is None or new_icon.isNull()):
+            return
+
+        # Troca direta quando não dá para animar
+        if not animate or self._icon is None or self._icon.isNull():
+            self._icon = new_icon
+            self._old_icon = None
+            self._progress = 1.0
+            self.update()
+            return
+
+        # Início do cross-fade
+        self._old_icon = self._icon
+        self._icon = new_icon
+        self._progress = 0.0
+
+        if self._anim:
+            try:
+                self._anim.stop()
+            except Exception:
+                pass
+
+        dur = int(duration_ms) if duration_ms is not None else self._fade_duration_ms
+        self._anim = QTimeLine(dur, self)
+        self._anim.setFrameRange(0, 100)
+        # Suavização real (EaseInOut)
+        try:
+            self._anim.setCurveShape(QTimeLine.CurveShape.EaseInOutCurve)
+        except Exception:
+            # fallback seguro caso a enum varie
+            self._anim.setCurveShape(QTimeLine.EaseInOutCurve)
+        # 60 fps aprox.
+        try:
+            self._anim.setUpdateInterval(16)
+        except Exception:
+            pass
+
+        self._anim.frameChanged.connect(self._on_anim_frame)
+        self._anim.finished.connect(self._on_anim_end)
+        self._anim.start()
         self.update()
 
-    def sizeHint(self): return QSize(self._icon_size, self._icon_size)
-    def minimumSizeHint(self): return self.sizeHint()
+    def _on_anim_frame(self, frame: int):
+        self._progress = max(0.0, min(1.0, frame / 100.0))
+        self.update()
 
+    def _on_anim_end(self):
+        self._progress = 1.0
+        self._old_icon = None
+        self.update()
+
+    def sizeHint(self):
+        return QSize(self._icon_size, self._icon_size)
+
+    def minimumSizeHint(self):
+        return self.sizeHint()
+
+    def _pixmap_for(self, icon: QIcon, dpr: float) -> Optional[QPixmap]:
+        phys_w, phys_h = int(self._icon_size * dpr), int(self._icon_size * dpr)
+        pm = icon.pixmap(phys_w, phys_h)
+        if pm.isNull():
+            return None
+        try:
+            pm.setDevicePixelRatio(dpr)
+        except Exception:
+            pass
+        return pm
+
+    # --------- Pintura (cross-fade) ---------
     def paintEvent(self, e):
-        if not self._icon or self._icon.isNull():
+        if (self._icon is None or self._icon.isNull()) and \
+           (self._old_icon is None or (self._old_icon and self._old_icon.isNull())):
             return
+
         w, h = self.width(), self.height()
         try:
             dpr = float(self.window().devicePixelRatioF()) if self.window() else 1.0
         except Exception:
             dpr = 1.0
 
-        phys_w, phys_h = int(self._icon_size * dpr), int(self._icon_size * dpr)
-        pm = self._icon.pixmap(phys_w, phys_h)
-        if pm.isNull():
-            return
-        try: pm.setDevicePixelRatio(dpr)
-        except Exception: pass
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
 
-        y = (h - self._icon_size) // 2
-        target = QRect(0, y, self._icon_size, self._icon_size)
+        p = self._progress  # 0 → antigo 100% / novo 0% ; 1 → antigo 0% / novo 100%
+        x = (w - self._icon_size) // 2
+        y = (h - self._icon_size) // 2  # centraliza verticalmente (caso o widget seja maior)
 
-        p = QPainter(self)
-        p.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        p.drawPixmap(target, pm)
-        p.end()
+        # antigo primeiro (se houver) com alpha decrescente
+        if self._old_icon and not self._old_icon.isNull():
+            old_alpha = 1.0 - p
+            if old_alpha > 0.0:
+                pm_old = self._pixmap_for(self._old_icon, dpr)
+                if pm_old:
+                    painter.save()
+                    painter.setOpacity(old_alpha)
+                    painter.drawPixmap(x, y, pm_old)
+                    painter.restore()
+
+        # novo depois, com alpha crescente
+        if self._icon and not self._icon.isNull():
+            new_alpha = p
+            if new_alpha > 0.0:
+                pm_new = self._pixmap_for(self._icon, dpr)
+                if pm_new:
+                    painter.save()
+                    painter.setOpacity(new_alpha)
+                    painter.drawPixmap(x, y, pm_new)
+                    painter.restore()
+
+        painter.end()
 
 
 class TitleBar(QWidget):
@@ -76,6 +174,7 @@ class TitleBar(QWidget):
         super().__init__(parent)
         self._pressed = False
         self._press_pos = QPoint()
+        self._suppress_next_win_icon_changed = False  # coalescer eventos
 
         self.setObjectName("TitleBar")
         self.setFixedHeight(36)
@@ -85,14 +184,14 @@ class TitleBar(QWidget):
         root.setContentsMargins(10, 0, 10, 0)
         root.setSpacing(8)
 
-        # ---- Ícone do app ----
+        # ---- Ícone do app (sempre no layout) ----
         self._icon = IconWidget(icon=icon, size=self._icon_size, parent=self)
+        # Se quiser ainda mais suave por tema: self._icon.setFadeDuration(260)
+        root.addWidget(self._icon, 0)
         if not self._icon._icon or self._icon._icon.isNull():
             self._icon.hide()
-        else:
-            root.addWidget(self._icon, 0)
 
-        # ---- Título (fallback sem ícone) ----
+        # ---- Título ----
         self._lbl = QLabel(title, self)
         self._lbl.setObjectName("TitleBarLabel")
         self._lbl.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
@@ -103,7 +202,7 @@ class TitleBar(QWidget):
         else:
             root.addWidget(self._lbl, 1)
 
-        # ---- Botões nativos ----
+        # ---- Botões ----
         self.btn_min   = QPushButton("–", self)
         self.btn_max   = QPushButton("□", self)
         self.btn_close = QPushButton("×", self)
@@ -119,7 +218,7 @@ class TitleBar(QWidget):
             b.setFlat(True)
             b.setToolTip(tip)
 
-        # ---- Engrenagem (segue o mesmo padrão visual por QSS) ----
+        # ---- Engrenagem ----
         self._btn_settings = QPushButton('⚙︎', self)
         self._btn_settings.setObjectName("TitleBarButton")
         self._btn_settings.setFlat(True)
@@ -130,7 +229,6 @@ class TitleBar(QWidget):
         f.setFamily("Segoe UI Symbol")
         self._btn_settings.setFont(f)
 
-        # ordem na barra
         root.addStretch(1)
         root.addWidget(self._btn_settings, 0)
         root.addWidget(self.btn_min, 0)
@@ -143,18 +241,58 @@ class TitleBar(QWidget):
         self.btn_max.clicked.connect(self.maximizeRestoreRequested.emit)
         self.btn_close.clicked.connect(self.closeRequested.emit)
 
+        # Conecta ao windowIconChanged assim que possível
+        QTimer.singleShot(0, self._hook_window_icon_signal)
+
+    # ---------- Integração com mudança de ícone da janela ----------
+    def _hook_window_icon_signal(self):
+        if hasattr(self, "_win_icon_hooked") and self._win_icon_hooked:
+            return
+        w = self.window()
+        if w is not None:
+            try:
+                w.windowIconChanged.connect(self._on_window_icon_changed)
+                self._win_icon_hooked = True
+            except Exception:
+                self._win_icon_hooked = False
+
+    def _on_window_icon_changed(self, icon: QIcon):
+        # Se acabamos de setar manualmente, ignorar este evento duplicado
+        if self._suppress_next_win_icon_changed:
+            return
+        try:
+            self._icon.setIcon(icon, animate=True)
+            self._icon.show()
+            self._lbl.hide()
+        except Exception:
+            pass
+
     # ---------- API ----------
     def setTitle(self, text: str) -> None:
         if not self._icon.isVisible():
             self._lbl.setText(text)
 
     def setIcon(self, icon: Union[str, QPixmap, QIcon]) -> bool:
-        self._icon.setIcon(icon)
+        # Sinalizamos para ignorar o windowIconChanged do mesmo ciclo
+        self._suppress_next_win_icon_changed = True
+        try:
+            self._icon.setIcon(icon, animate=True)
+        finally:
+            # libera no próximo tick do event loop (coalescência)
+            QTimer.singleShot(0, lambda: setattr(self, "_suppress_next_win_icon_changed", False))
+
         ok = self._icon._icon is not None and not self._icon._icon.isNull()
         if ok:
             self._icon.show()
             self._lbl.hide()
         return ok
+
+    # aliases p/ compatibilidade
+    def set_icon(self, icon: Union[str, QPixmap, QIcon]) -> bool:
+        return self.setIcon(icon)
+
+    def updateIcon(self, icon: Union[str, QPixmap, QIcon]) -> bool:
+        return self.setIcon(icon)
 
     def setMaximized(self, is_max: bool):
         self.btn_max.setText("❐" if is_max else "□")
@@ -189,7 +327,6 @@ class TitleBar(QWidget):
         else:
             super().mouseDoubleClickEvent(e)
 
-    # ---------- eventos sistêmicos ----------
-    def event(self, e):
-        # sem pintura manual -> nada a refazer em troca de tema
-        return super().event(e)
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._hook_window_icon_signal()

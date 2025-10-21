@@ -110,7 +110,7 @@ def _normalize_vars(tokens: dict | None) -> dict:
 
     # Derivados: content_bg = bg_start ~20% mais escuro (para fundos sólidos)
     bg0 = vars_.get("bg_start", _DEFAULTS["bg_start"])
-    vars_["content_bg"] = _darken_hex(bg0, 0.8)   # 120% “mais escuro” = 20% darker
+    vars_["content_bg"] = _darken_hex(bg0, 0.9)   # 120% “mais escuro” = 20% darker
     vars_["panel_bg"]   = vars_["content_bg"]     # alias opcional
 
     return vars_
