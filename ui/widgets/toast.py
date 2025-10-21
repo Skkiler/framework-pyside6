@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QPushButton, QProgressBar
 )
 
-from ..core.frameless_window import FramelessWindow
+from ui.core.frameless_window import FramelessWindow
 
 
 # ==================== Manager para empilhar/posicionar toasts ====================

@@ -4,6 +4,6 @@
     "label": "Ínicio",
     "sidebar": true,
     "order": 0,
-    "factory": "ui.pages.home_page:build"
+    "factory": "app.pages.home_page:build"
   }
 ]

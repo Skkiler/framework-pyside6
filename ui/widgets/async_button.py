@@ -81,7 +81,8 @@ class AsyncTaskButton(HoverButton):
         self._t_err  = toast_error
         self._orig_text = text
 
-        self._pool = QThreadPool.globalInstance()
+        self._pool = getattr(self, "_pool", None) or QThreadPool.globalInstance()
+        self._jobs: list[_TaskRunnable] = []
 
         # overlay e bloqueio
         self._block_input = bool(block_input)
@@ -162,8 +163,17 @@ class AsyncTaskButton(HoverButton):
                 self.setText("Executando…")
 
         job = _TaskRunnable(self._runner.run_task, self._cmd, self._payload)
-        job.signals.finished.connect(self._finish)
+        self._jobs.append(job)
+        job.signals.finished.connect(lambda res, j=job: self._finish_and_cleanup(j, res))
         self._pool.start(job)
+
+    def _finish_and_cleanup(self, job: _TaskRunnable, result: dict):
+        try:
+            if job in self._jobs:
+                self._jobs.remove(job)
+        except Exception:
+            pass
+        self._finish(result)
 
     def _finish(self, result: dict):
         # encerra overlay

@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication
 import app.settings as cfg
 from ui.core.app_controller import AppController
 from ui.core.settings import Settings
+from ui.core.utils.theme_icon_watcher import ThemeIconWatcher
 
 # Splash opcional
 try:

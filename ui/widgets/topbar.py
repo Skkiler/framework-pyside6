@@ -1,7 +1,7 @@
 # ui/widgets/topbar.py
 
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QSpacerItem, QSizePolicy
-from ..widgets.buttons import Controls
+from ui.widgets.buttons import Controls
 
 
 class TopBar(QWidget):

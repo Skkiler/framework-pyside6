@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Optional
 
-from ..services.task_runner_adapter import TaskRunnerAdapter
+from ui.services.task_runner_adapter import TaskRunnerAdapter
 from .app import AppShell
-from ..pages.registry import load_from_manifest, discover_pages
+from app.pages.registry import load_from_manifest, discover_pages
 
 
 @dataclass(frozen=True)

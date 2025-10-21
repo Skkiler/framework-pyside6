@@ -10,7 +10,7 @@ from PySide6.QtCore import QObject, Signal, QTimeLine, QFileSystemWatcher
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication, QWidget
 
-from ..services.qss_renderer import load_base_qss, render_qss_from_base
+from ui.services.qss_renderer import load_base_qss, render_qss_from_base
 from .settings import Settings
 from .interface_ports import IThemeRepository
 

@@ -11,13 +11,13 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
 from .router import Router
 from .settings import Settings
 from .theme_service import ThemeService
-from ..widgets.topbar import TopBar
-from ..widgets.overlay_sidebar import OverlaySidePanel
-from ..services.theme_repository_json import JsonThemeRepository
+from ui.widgets.topbar import TopBar
+from ui.widgets.overlay_sidebar import OverlaySidePanel
+from ui.services.theme_repository_json import JsonThemeRepository
 from .frameless_window import FramelessWindow
-from ..widgets.titlebar import TitleBar
-from ..widgets.settings_sidebar import SettingsSidePanel
-from ..pages.settings import build as build_settings_page
+from ui.widgets.titlebar import TitleBar
+from ui.widgets.settings_sidebar import SettingsSidePanel
+from app.pages.settings import build as build_settings_page
 
 # utils
 from .utils.paths import ensure_dir, safe_icon

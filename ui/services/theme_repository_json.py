@@ -2,7 +2,7 @@
 
 import json, os, tempfile, platform
 from typing import List, Dict, Any
-from ..core.interface_ports import IThemeRepository
+from ui.core.interface_ports import IThemeRepository
 
 def _ensure_dir(p: str) -> str:
     ap = os.path.abspath(p)

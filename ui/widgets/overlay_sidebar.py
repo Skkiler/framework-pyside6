@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QFrame, QWidget, QVBoxLayout, QListWidget, QListWidgetItem, QLabel,
     QHBoxLayout
 )
-from ..widgets.buttons import Controls  # usamos Controls.IconButton
+from ui.widgets.buttons import Controls  # usamos Controls.IconButton
 
 EXPANDED_WIDTH = 240
 

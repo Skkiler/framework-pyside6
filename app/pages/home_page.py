@@ -4,9 +4,9 @@ from __future__ import annotations
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame, QHBoxLayout
 from PySide6.QtCore import QTimer, Qt
 
-from ..widgets.buttons import Controls, command_button
-from ..widgets.async_button import AsyncTaskButton
-from ..widgets.toast import show_toast, ProgressToast   # novos toasts
+from ui.widgets.buttons import Controls, command_button
+from ui.widgets.async_button import AsyncTaskButton
+from ui.widgets.toast import show_toast, ProgressToast   # novos toasts
 
 PAGE = {
     "route": "home",

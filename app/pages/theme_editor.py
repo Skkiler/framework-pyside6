@@ -11,10 +11,10 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QColor
 
-from ..core.frameless_window import FramelessDialog
-from ..widgets.titlebar import TitleBar
+from ui.core.frameless_window import FramelessDialog
+from ui.widgets.titlebar import TitleBar
 
-from ..services.qss_renderer import load_base_qss, render_qss_from_base
+from ui.services.qss_renderer import load_base_qss, render_qss_from_base
 import app.settings as cfg
 
 # === Tokens padrão ===

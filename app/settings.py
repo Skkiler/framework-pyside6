@@ -1,5 +1,12 @@
+# app/settings.py
+
 from pathlib import Path
+from typing import Optional
 import shutil
+import json
+import re
+import unicodedata
+
 
 # ---------------------------------------------------------------------------
 # Metadados do app
@@ -14,7 +21,8 @@ PAGES_MANIFEST_FILENAME = "pages_manifest.json"
 # ---------------------------------------------------------------------------
 BASE_DIR   = Path(__file__).resolve().parent
 UI_DIR     = (BASE_DIR.parent / "ui").resolve()
-ASSETS_DIR = (UI_DIR / "assets").resolve()
+APP_DIR    = (BASE_DIR.parent / "app").resolve()
+ASSETS_DIR = (APP_DIR / "assets").resolve()
 ICONS_DIR  = (ASSETS_DIR / "icons").resolve()
 _ASSET_QSS_DIR    = (ASSETS_DIR / "qss").resolve()
 _ASSET_THEMES_DIR = (ASSETS_DIR / "themes").resolve()
@@ -63,3 +71,97 @@ except Exception:
 #  - Não há dependência de APPDATA, ~/.config, etc.
 #  - A pasta do app precisa ser gravável (ok em dev ou se instalado no modo user).
 # ---------------------------------------------------------------------------
+
+# Helpers
+
+def _slugify_theme(name: str) -> str:
+    if not isinstance(name, str):
+        return ""
+    s = unicodedata.normalize("NFKD", name)
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")  # remove acentos
+    s = re.sub(r"[^A-Za-z0-9]+", "-", s).strip("-").lower()
+    return s
+
+def _read_exec_settings_theme() -> Optional[str]:
+    # 1) Caminho via settings (preferível)
+    json_path = None
+    try:
+        json_path = (CACHE_DIR / "_ui_exec_settings.json").resolve()
+    except Exception:
+        json_path = None
+
+    # 2) Fallback: estrutura padrão do projeto (repo/app/assets/cache)
+    if not json_path or not json_path.exists():
+        here = Path(__file__).resolve()
+        repo = here.parents[2] if len(here.parents) >= 3 else here.parent
+        alt = (repo / "app" / "assets" / "cache" / "_ui_exec_settings.json")
+        if alt.exists():
+            json_path = alt.resolve()
+
+    if not json_path or not json_path.exists():
+        return None
+
+    # 3) Ler o JSON com segurança
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        theme = data.get("theme")
+        if isinstance(theme, str) and theme.strip():
+            return theme.strip()
+    except Exception:
+        pass
+    return None
+
+def resolve_app_icon_path(theme: Optional[str] = None) -> Optional[Path]:
+    # 1) tema → slug
+    try:
+        theme = theme or _read_exec_settings_theme() or DEFAULT_THEME
+    except Exception:
+        theme = DEFAULT_THEME
+
+    try:
+        slug = _slugify_theme(theme) if theme else ""
+    except Exception:
+        slug = (str(theme).strip().lower().replace(" ", "-")) if theme else ""
+
+    # 2) nomes candidatos
+    names = []
+    if slug:
+        names += [f"{slug}_app.ico", f"{slug}-app.ico", f"app_{slug}.ico"]
+    names.append("app.ico")
+
+    # 3) diretórios candidatos
+    candidates = []
+    try:
+        if ICONS_DIR:
+            candidates += [(ICONS_DIR / n).resolve() for n in names]
+    except Exception:
+        pass
+    try:
+        if ASSETS_DIR:
+            candidates += [ (ASSETS_DIR / "icons" / n).resolve() for n in names ]
+    except Exception:
+        pass
+    try:
+        if UI_DIR:
+            candidates += [ (UI_DIR / "assets" / "icons" / n).resolve() for n in names ]
+    except Exception:
+        pass
+
+    # 4) fallbacks compat para ambiente de dev
+    try:
+        repo = BASE_DIR.parents[1] if len(BASE_DIR.parents) >= 2 else BASE_DIR
+        candidates += [
+            *[(repo / "ui" / "assets" / "icons" / n).resolve() for n in names],
+            *[(repo / "assets" / "icons" / n).resolve() for n in names],
+        ]
+    except Exception:
+        pass
+
+    for p in candidates:
+        try:
+            if p.exists():
+                return p
+        except Exception:
+            continue
+    return None

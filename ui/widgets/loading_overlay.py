@@ -4,20 +4,76 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional, Tuple
 
-from PySide6.QtCore import Qt, QEvent, QRect, QSize
+from PySide6.QtCore import Qt, QEvent, QRect, QSize, QFileSystemWatcher
 from PySide6.QtGui import QMovie
 from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QSizePolicy, QFrame
 
+# --- Integrar com app.settings para resolver caminhos de assets ---
+try:
+    from app import settings as S
+except Exception:
+    S = None
+
 
 def _default_gif_path() -> Optional[str]:
-    here = Path(__file__).resolve()
-    repo = here.parents[2]
-    ui_icons = repo / "ui" / "assets" / "icons" / "loading.gif"
-    root_icons = repo / "assets" / "icons" / "loading.gif"
-    if ui_icons.exists(): return str(ui_icons)
-    if root_icons.exists(): return str(root_icons)
-    return None
+    # Tema via helpers do settings (você centralizou aí) → fallback DEFAULT_THEME
+    theme = None
+    try:
+        if S and hasattr(S, "_read_exec_settings_theme"):
+            theme = S._read_exec_settings_theme()
+    except Exception:
+        theme = None
+    if (not theme) and S and getattr(S, "DEFAULT_THEME", None):
+        theme = str(S.DEFAULT_THEME)
 
+    # Slug via helper do settings (com fallback se não existir)
+    try:
+        slug = S._slugify_theme(theme) if (S and theme) else ""
+    except Exception:
+        slug = (str(theme).strip().lower().replace(" ", "-")) if theme else ""
+
+    # 1) Nomes candidatos priorizando o tema
+    names = []
+    if slug:
+        names += [
+            f"loading_{slug}.gif",   # loading_aku.gif / loading-aku-dark.gif (se o tema já veio com '-')
+            f"loading-{slug}.gif",   # loading-aku.gif
+            f"{slug}_loading.gif",   # aku_loading.gif
+        ]
+    names.append("loading.gif")       # fallback genérico
+
+    # 2) Diretórios candidatos (prioridade: settings → compat)
+    candidates = []
+
+    if S:
+        icons_dir   = getattr(S, "ICONS_DIR", None)
+        assets_dir  = getattr(S, "ASSETS_DIR", None)
+        ui_dir      = getattr(S, "UI_DIR", None)
+
+        if icons_dir:
+            candidates += [(icons_dir / n) for n in names]
+        if assets_dir:
+            candidates += [(assets_dir / "icons" / n) for n in names]
+        if ui_dir:
+            candidates += [(ui_dir / "assets" / "icons" / n) for n in names]
+
+    # Fallbacks compatíveis com o código antigo (não quebrar dev)
+    here = Path(__file__).resolve()
+    repo = here.parents[2] if len(here.parents) >= 3 else here.parent
+    candidates += [
+        *(repo / "ui" / "assets" / "icons" / n for n in names),
+        *(repo / "assets" / "icons" / n for n in names),
+    ]
+
+    # 3) Retorna o primeiro que existir
+    for p in candidates:
+        try:
+            if p.exists():
+                return str(p)
+        except Exception:
+            continue
+
+    return None
 
 # -------- Compat de eventos (Qt/PySide variam por versão) --------------------
 # Constrói uma tupla apenas com os tipos que EXISTEM no runtime atual
@@ -28,6 +84,7 @@ def _opt_events(*names: str) -> tuple:
         if v is not None:
             present.append(v)
     return tuple(present)
+
 
 # Eventos “comuns” que sempre existem
 _BASE_LAYOUT_EVENTS = (
@@ -43,6 +100,13 @@ _DPI_SCREEN_EVENTS = _opt_events(
     "PaletteChange",                # temas podem provocar reflow
     "HighDpiScaleFactorChange",     # algumas builds Qt6
 )
+
+_THEME_CHANGE_EVENTS = _opt_events(
+    "PaletteChange",
+    "ApplicationPaletteChange",
+    "StyleChange",
+)
+
 
 class LoadingOverlay(QWidget):
     def __init__(
@@ -64,6 +128,8 @@ class LoadingOverlay(QWidget):
         self._movie: Optional[QMovie] = None
         self._block_input = bool(block_input)
         self._active = False
+        self._gif_path_str: Optional[str] = None
+        self._last_seen_theme: Optional[str] = None  # tema visto na última resolução
 
         # Guarda refs e instala filtros no parent e na janela top-level
         self._parent = parent
@@ -94,8 +160,10 @@ class LoadingOverlay(QWidget):
         lay.addWidget(self._gif_label, 0, Qt.AlignCenter)
         lay.addWidget(self._text, 0, Qt.AlignCenter)
 
+        # Inicializa movie com caminho resolvido (ou ícone fallback ⏳)
         path = gif_path or _default_gif_path()
         if path and Path(path).exists():
+            self._gif_path_str = path
             self._movie = QMovie(path)
             self._gif_label.setMovie(self._movie)
         else:
@@ -130,11 +198,24 @@ class LoadingOverlay(QWidget):
             # "theme": nenhum estilo inline -> base.qss controla
             self._panel.setStyleSheet("")
 
+        # ---- Watcher para mudanças no arquivo de exec (_ui_exec_settings.json)
+        self._watcher: Optional[QFileSystemWatcher] = None
+        try:
+            if S and getattr(S, "CACHE_DIR", None):
+                json_path = (S.CACHE_DIR / "_ui_exec_settings.json")
+                if json_path.exists():
+                    self._watcher = QFileSystemWatcher([str(json_path)])
+                    self._watcher.fileChanged.connect(self._on_exec_file_changed)
+        except Exception:
+            self._watcher = None
+
     # ---------- API ----------
     def show(self, message: Optional[str] = None):
         if message is not None:
             self._text.setText(message)
         self._active = True
+        # Garante que, ao mostrar, já esteja com o GIF do tema atual
+        self._maybe_reload_gif_for_theme()
         self._reposition()
         self.raise_()
         super().show()
@@ -151,6 +232,8 @@ class LoadingOverlay(QWidget):
     # ---------- Qt events ----------
     def showEvent(self, e):
         super().showEvent(e)
+        # Revalida o GIF no primeiro show (caso tema tenha mudado antes)
+        self._maybe_reload_gif_for_theme()
         self._reposition()
         if self._movie:
             self._apply_scaled_size()
@@ -178,7 +261,7 @@ class LoadingOverlay(QWidget):
                 return super().eventFilter(watched, event)
 
             # Layout/state/screen changes
-            if et in _BASE_LAYOUT_EVENTS or et in _DPI_SCREEN_EVENTS:
+            if et in _BASE_LAYOUT_EVENTS or et in _DPI_SCREEN_EVENTS or et in _THEME_CHANGE_EVENTS:
                 if self._active:
                     # Se o parent acabou de aparecer/voltou ao stack, reexiba o overlay
                     if et in (QEvent.Show, QEvent.ShowToParent) and not self.isVisible():
@@ -195,6 +278,10 @@ class LoadingOverlay(QWidget):
                         # Em mudanças de DPI/tela, garanta que o GIF reescale
                         if et in _DPI_SCREEN_EVENTS:
                             self._movie.start()
+
+                # Em eventos ligados a mudança de paleta/tema/estilo → recarrega GIF se mudou
+                if et in _THEME_CHANGE_EVENTS:
+                    self._maybe_reload_gif_for_theme()
 
         return super().eventFilter(watched, event)
 
@@ -239,7 +326,6 @@ class LoadingOverlay(QWidget):
             lay.activate()
 
     def _ideal_panel_side(self) -> int:
-
         par = self.parentWidget()
         if not par:
             return 240
@@ -260,12 +346,9 @@ class LoadingOverlay(QWidget):
         side = min(cap, side)
         return side
 
-
     def _content_hint(self, max_text_width: int = 280) -> Tuple[int, int]:
-
         self._text.setWordWrap(True)
         self._text.setMaximumWidth(max(180, max_text_width))
-
 
         if self._movie:
             side_guess = max(48, min(int(max_text_width * 0.5), 160))
@@ -280,8 +363,76 @@ class LoadingOverlay(QWidget):
 
         return 220, 160
 
-
     # bloqueia somente a área do conteúdo (parent)
-    def mousePressEvent(self, e):  e.accept() if self._block_input else e.ignore()
-    def mouseReleaseEvent(self, e): e.accept() if self._block_input else e.ignore()
-    def keyPressEvent(self, e):     e.accept() if self._block_input else e.ignore()
+    def mousePressEvent(self, e):
+        e.accept() if self._block_input else e.ignore()
+
+    def mouseReleaseEvent(self, e):
+        e.accept() if self._block_input else e.ignore()
+
+    def keyPressEvent(self, e):
+        e.accept() if self._block_input else e.ignore()
+
+    # ---------- Tema / Watcher ----------
+    def _current_theme(self) -> str:
+        """Tema atual via helpers do settings; fallback DEFAULT_THEME."""
+        try:
+            if S and hasattr(S, "_read_exec_settings_theme"):
+                t = S._read_exec_settings_theme()
+                if isinstance(t, str) and t.strip():
+                    return t.strip()
+        except Exception:
+            pass
+        return (getattr(S, "DEFAULT_THEME", "") or "") if S else ""
+
+    def _maybe_reload_gif_for_theme(self):
+        """
+        Se o tema mudou (ou o path do GIF mudou), recarrega o QMovie.
+        Chamada em showEvent, eventos de paleta/estilo e quando o JSON muda.
+        """
+        try:
+            current_theme = self._current_theme()
+            # Atualiza last_seen para evitar recarregar à toa
+            theme_changed = (current_theme != self._last_seen_theme)
+            new_path = _default_gif_path()
+            path_changed = (new_path != self._gif_path_str)
+
+            if not theme_changed and not path_changed:
+                return
+
+            self._last_seen_theme = current_theme
+            self._gif_path_str = new_path
+
+            if new_path and Path(new_path).exists():
+                new_movie = QMovie(new_path)
+                self._movie = new_movie
+                self._gif_label.setMovie(self._movie)
+                if self._active:
+                    self._apply_scaled_size()
+                    self._movie.start()
+            else:
+                # fallback: sem GIF
+                self._gif_label.setMovie(None)
+                self._movie = None
+                self._gif_label.setText("⏳")
+                self._gif_label.setStyleSheet("font-size: 28px;")
+        except Exception:
+            # manter o overlay funcional mesmo se falhar o reload
+            pass
+
+    def _on_exec_file_changed(self, changed_path: str):
+
+        try:
+            p = Path(changed_path)
+            if p.exists() and self._watcher:
+                # Garante que o caminho esteja sendo observado (alguns editores recriam o arquivo)
+                watched = set(self._watcher.files())
+                if str(p) not in watched:
+                    try:
+                        self._watcher.addPath(str(p))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        # Recarrega o GIF conforme o novo tema
+        self._maybe_reload_gif_for_theme()

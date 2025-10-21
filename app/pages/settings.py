@@ -12,12 +12,11 @@ from PySide6.QtWidgets import (
     QMenu, QDialog, QLineEdit, QPushButton, QToolButton
 )
 
-from ..core.theme_service import ThemeService
-    # Controls usado para o toggle de splash
-from ..widgets.buttons import Controls
+from ui.core.theme_service import ThemeService
+from ui.widgets.buttons import Controls
 from .theme_editor import ThemeEditorDialog
-from ..core.frameless_window import FramelessDialog
-from ..widgets.titlebar import TitleBar
+from ui.core.frameless_window import FramelessDialog
+from ui.widgets.titlebar import TitleBar
 
 # onde estão os temas; tenta vir de app.settings, cai para ui/assets/themes
 try:
