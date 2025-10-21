@@ -24,6 +24,8 @@ UI_DIR     = (BASE_DIR.parent / "ui").resolve()
 APP_DIR    = (BASE_DIR.parent / "app").resolve()
 ASSETS_DIR = (APP_DIR / "assets").resolve()
 ICONS_DIR  = (ASSETS_DIR / "icons").resolve()
+APP_ICONS_DIR = (ICONS_DIR / "app").resolve()
+CLIENT_ICONS_DIR = (ICONS_DIR / "client").resolve()
 _ASSET_QSS_DIR    = (ASSETS_DIR / "qss").resolve()
 _ASSET_THEMES_DIR = (ASSETS_DIR / "themes").resolve()
 

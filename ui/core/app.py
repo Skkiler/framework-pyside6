@@ -89,7 +89,7 @@ class AppShell(FramelessWindow):
         root_v.setSpacing(0)
 
         # TitleBar (janela principal)
-        icon_path = self.assets_dir / "icons" / "app.ico"
+        icon_path = self.assets_dir / "icons" / "app" / "app.ico"
         icon_ref = safe_icon(icon_path)
         self.titlebar = TitleBar(title, self, icon=icon_ref)
         root_v.addWidget(self.titlebar)
@@ -182,11 +182,6 @@ class AppShell(FramelessWindow):
     # ---------------------- ÍCONE DO APP SINCRONIZADO COM TEMA ----------------------
 
     def _setup_theme_icon_sync(self) -> None:
-        """
-        - Aplica o ícone inicial conforme tema atual.
-        - Conecta nos sinais de troca de tema.
-        - Observa o cache/_ui_exec_settings.json (como o loading_overlay) para reagir a mudanças externas.
-        """
         # 1) Conecta em sinais do ThemeService (pegamos os mais comuns)
         try:
             if hasattr(self, "theme_service"):
@@ -350,9 +345,6 @@ class AppShell(FramelessWindow):
         return candidatos[0]
 
     def _resolve_app_icon_path(self, theme_name: str) -> Path | None:
-        """
-        Resolve o arquivo do ícone considerando múltiplos slugs, padrões e diretórios.
-        """
         slugs = self._theme_slug_candidates(theme_name)
 
         def name_candidates(s: str) -> list[str]:

@@ -9,7 +9,6 @@ from PySide6.QtWidgets import QApplication
 import app.settings as cfg
 from ui.core.app_controller import AppController
 from ui.core.settings import Settings
-from ui.core.utils.theme_icon_watcher import ThemeIconWatcher
 
 # Splash opcional
 try:
@@ -75,12 +74,6 @@ def _make_splash() -> object | None:
 
 
 def _should_show_splash(settings: Settings) -> bool:
-    """
-    Verifica nas settings do usuário se o splash deve ser exibido.
-    - chave: "splash"
-    - True  → mostrar splash
-    - False → pular splash
-    """
     try:
         return bool(settings.read("splash", True))
     except Exception:

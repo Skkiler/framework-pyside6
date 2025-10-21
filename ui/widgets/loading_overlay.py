@@ -46,24 +46,8 @@ def _default_gif_path() -> Optional[str]:
     candidates = []
 
     if S:
-        icons_dir   = getattr(S, "ICONS_DIR", None)
-        assets_dir  = getattr(S, "ASSETS_DIR", None)
-        ui_dir      = getattr(S, "UI_DIR", None)
-
-        if icons_dir:
-            candidates += [(icons_dir / n) for n in names]
-        if assets_dir:
-            candidates += [(assets_dir / "icons" / n) for n in names]
-        if ui_dir:
-            candidates += [(ui_dir / "assets" / "icons" / n) for n in names]
-
-    # Fallbacks compatíveis com o código antigo (não quebrar dev)
-    here = Path(__file__).resolve()
-    repo = here.parents[2] if len(here.parents) >= 3 else here.parent
-    candidates += [
-        *(repo / "ui" / "assets" / "icons" / n for n in names),
-        *(repo / "assets" / "icons" / n for n in names),
-    ]
+        client_dir  = getattr(S, "CLIENT_ICONS_DIR", None)
+        candidates += [(client_dir / n) for n in names]
 
     # 3) Retorna o primeiro que existir
     for p in candidates:
