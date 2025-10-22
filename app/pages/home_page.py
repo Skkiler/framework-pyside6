@@ -6,10 +6,12 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QFrame, QHBoxLayout, QGridLayout, QSizePolicy
 )
 from PySide6.QtCore import QTimer, Qt
+from PySide6.QtGui import QFontMetrics
 
-from ui.widgets.buttons import Controls, command_button
+from ui.widgets.buttons import Controls, command_button, attach_popover
 from ui.widgets.async_button import AsyncTaskButton
 from ui.widgets.toast import show_toast, ProgressToast
+
 
 PAGE = {
     "route": "home",
@@ -22,9 +24,6 @@ PAGE = {
 # Helpers visuais
 # ------------------------------------------------------------
 def _section(parent: QWidget, title: str, subtitle: str | None = None) -> QFrame:
-    """
-    Card de conteúdo com título (e opcionalmente subtítulo).
-    """
     frame = QFrame(parent)
     frame.setProperty("elevation", "panel")
 
@@ -40,14 +39,14 @@ def _section(parent: QWidget, title: str, subtitle: str | None = None) -> QFrame
     title_lbl.setFont(f)
     outer.addWidget(title_lbl)
 
-    # Subtítulo opcional
+    # Subtítulo (opcional)
     if subtitle:
         sub = QLabel(subtitle, frame)
         sub.setWordWrap(True)
         sub.setStyleSheet("opacity: 0.85;")
         outer.addWidget(sub)
 
-    # Conteúdo
+    # Conteúdo do card
     content = QFrame(frame)
     content.setFrameShape(QFrame.NoFrame)
     inner = QVBoxLayout(content)
@@ -61,19 +60,39 @@ def _section(parent: QWidget, title: str, subtitle: str | None = None) -> QFrame
 
 
 def _chip(text: str) -> Controls.Button:
-    btn = Controls.Button(text)
+    btn = Controls.Button(text, size_preset="sm")
     btn.setProperty("variant", "chip")
+    btn.setProperty("size", "sm")
     btn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+    # mantém consistência imediata do QSS
+    _repolish(btn)
     return btn
+
+
+def _btn(text: str, preset: str = "md", *, variant: str | None = None) -> Controls.Button:
+    """
+    Cria botão garantindo o dynamic property `size` (exigido pelo QSS)
+    e, se informado, define a variante (primary/secondary/ghost).
+    """
+    b = Controls.Button(text, size_preset=preset)
+    b.setProperty("size", preset)
+    if variant:
+        b.setProperty("variant", variant)
+    _repolish(b)   # aplica o QSS imediatamente
+    return b
+
+
+def _repolish(w: QWidget) -> None:
+    """Força reaplicação de QSS quando setamos dynamic properties em runtime."""
+    s = w.style()
+    s.unpolish(w)
+    s.polish(w)
 
 
 # ============================================================
 # Subpágina 1 (embutida): home/ferramentas
 # ============================================================
 class HomeToolsPage(QWidget):
-    """
-    Subpágina direta de 'home' (home/ferramentas) — exemplo de conteúdo e navegação.
-    """
     def __init__(self):
         super().__init__()
         root = QVBoxLayout(self)
@@ -90,14 +109,14 @@ class HomeToolsPage(QWidget):
 
         row = QHBoxLayout()
         row.setSpacing(8)
-        bt1 = Controls.Button("Abrir Detalhes")
-        bt1.setProperty("variant", "primary")
+
+        bt1 = _btn("Abrir Detalhes", "md", variant="primary")
         bt1.clicked.connect(lambda: self._go("home/ferramentas/detalhes"))
         row.addWidget(bt1)
 
-        bt2 = Controls.Button("Voltar à Home")
-        bt2.clicked.connect(lambda: self._go("home"))
+        bt2 = _btn("Voltar à Home", "sm")  # default preenchido
         row.addWidget(bt2)
+        bt2.clicked.connect(lambda: self._go("home"))
 
         row.addStretch(1)
         lay.addLayout(row)
@@ -122,9 +141,6 @@ def build_home_tools(*_, **__) -> QWidget:
 # Subpágina 2 (embutida): home/ferramentas/detalhes
 # ============================================================
 class HomeToolsDetailsPage(QWidget):
-    """
-    Sub-subpágina (home/ferramentas/detalhes) — mostra ações e micro-conteúdo.
-    """
     def __init__(self):
         super().__init__()
         root = QVBoxLayout(self)
@@ -151,13 +167,14 @@ class HomeToolsDetailsPage(QWidget):
 
         row = QHBoxLayout()
         row.setSpacing(8)
-        back = Controls.Button("↩ Voltar")
+        back = _btn("↩ Voltar", "sm")
         back.clicked.connect(lambda: self._go("home/ferramentas"))
         row.addWidget(back)
 
-        home = Controls.Button("Início")
+        home = _btn("Início", "sm")
         home.clicked.connect(lambda: self._go("home"))
         row.addWidget(home)
+
         row.addStretch(1)
         lay.addLayout(row)
 
@@ -178,12 +195,31 @@ def build_home_tools_details(*_, **__) -> QWidget:
 
 
 # ============================================================
-# Página Home (raiz) — tutorial bonito
+# Página Home (raiz) — com Scroll global e popover atrelado
 # ============================================================
 class HomePage(QWidget):
     def __init__(self, task_runner):
         super().__init__()
-        root = QVBoxLayout(self)
+
+        # ===== Scroll global =====
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroller = Controls.ScrollArea(self)
+        scroller.setObjectName("HomeScrollArea")
+        scroller.setFrameShape(QFrame.NoFrame)
+        outer.addWidget(scroller)
+
+        self.setMinimumSize(900, 640)
+
+        # Conteúdo (transparente para herdar gradiente do #FramelessFrame)
+        content = QWidget()
+        content.setObjectName("FramelessContent")
+        content.setAttribute(Qt.WA_StyledBackground, False)
+        scroller.setWidget(content)
+
+        root = QVBoxLayout(content)
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(14)
 
@@ -191,28 +227,29 @@ class HomePage(QWidget):
         # HERO
         # -----------------------------------------------------
         hero = _section(
-            self,
+            content,
             "Bem-vindo 👋",
             "Este projeto traz um shell com Router, TopBar (breadcrumb), histórico, Quick Open (Ctrl+K), "
             "ThemeService, Settings, toasts e comandos. Esta Home é um guia interativo."
         )
         hero_lay = hero._content.layout()  # type: ignore[attr-defined]
 
+
         chips = QHBoxLayout()
         chips.setSpacing(6)
         for t in ("Router", "Breadcrumb", "Histórico", "Quick Open", "Toasts", "Async"):
-            chips.addWidget(_chip(t))
+            btn = Controls.Button(t); btn.setProperty("variant", "chip"); chips.addWidget(btn)
         chips.addStretch(1)
         hero_lay.addLayout(chips)
 
         cta_row = QHBoxLayout()
         cta_row.setSpacing(8)
-        goto_tools = Controls.Button("▶ Abrir Ferramentas")
-        goto_tools.setProperty("variant", "primary")
+
+        goto_tools = _btn("Abrir Ferramentas", "md", variant="primary")
         goto_tools.clicked.connect(lambda: self._go("home/ferramentas"))
         cta_row.addWidget(goto_tools)
 
-        goto_guide = Controls.Button("📘 Guia Rápido (Subpágina externa)")
+        goto_guide = _btn("Guia Rápido (Subpágina externa)", "sm")
         goto_guide.clicked.connect(lambda: self._go("home/guia"))
         cta_row.addWidget(goto_guide)
 
@@ -225,7 +262,7 @@ class HomePage(QWidget):
         # Navegação (conceitos)
         # -----------------------------------------------------
         nav = _section(
-            self,
+            content,
             "Navegação & Rotas",
             "Rotas são hierárquicas (ex.: home/ferramentas/detalhes), o breadcrumb mostra o caminho "
             "e é clicável. Use Alt+←/Alt+→ para voltar/avançar. A última rota é restaurada ao abrir o app."
@@ -233,11 +270,11 @@ class HomePage(QWidget):
         nav_lay = nav._content.layout()  # type: ignore[attr-defined]
 
         nav_buttons = QHBoxLayout()
-        b1 = Controls.Button("Ir para Ferramentas (home/ferramentas)")
+        b1 = _btn("Ir para Ferramentas (home/ferramentas)", "sm", variant="primary")
         b1.clicked.connect(lambda: self._go("home/ferramentas"))
         nav_buttons.addWidget(b1)
 
-        b2 = Controls.Button("Ir para Detalhes (home/ferramentas/detalhes)")
+        b2 = _btn("Ir para Detalhes (home/ferramentas/detalhes)", "sm")
         b2.clicked.connect(lambda: self._go("home/ferramentas/detalhes"))
         nav_buttons.addWidget(b2)
 
@@ -250,33 +287,74 @@ class HomePage(QWidget):
         root.addWidget(nav)
 
         # -----------------------------------------------------
-        # Quick Open
+        # Quick Open + Popover
         # -----------------------------------------------------
         qopen = _section(
-            self,
+            content,
             "Quick Open (Ctrl+K) — estilizado",
             "Pressione Ctrl+K para abrir o Quick Open frameless (mesmo tema), filtrando por nome/rota. "
             "Somente páginas com 'sidebar=True' aparecem."
         )
         qopen_lay = qopen._content.layout()  # type: ignore[attr-defined]
         qopen_lay.addWidget(QLabel("Experimente: digite “Ferramentas” ou “home/…”."))
+
+        lbl_hint = QLabel("Mantenha o mouse sobre este texto para saber mais.")
+        lbl_hint.setAttribute(Qt.WA_Hover, True)
+        qopen_lay.addWidget(lbl_hint)
+
+        attach_popover(
+            lbl_hint,
+            "Dica (Popover)",
+            "Popovers servem para dicas curtas e contextuais sem mudar de tela.",
+            "Ctrl+K"
+        )
+
+        # Marca para QSS (sublinhado pontilhado) e reaplica estilo
+        lbl_hint.setProperty("hasPopover", True)
+        _repolish(lbl_hint)
+
         root.addWidget(qopen)
 
         # -----------------------------------------------------
         # Ações / Async / Toasts
         # -----------------------------------------------------
         actions = _section(
-            self,
+            content,
             "Ações e Execução",
-            "Abaixo há exemplos de execução síncrona e assíncrona, com overlay e toasts de feedback."
+            "Exemplos de execução síncrona/assíncrona, com feedback visual e bloqueios opcionais."
         )
         a_lay = actions._content.layout()  # type: ignore[attr-defined]
 
         row_cmds = QHBoxLayout()
         row_cmds.setSpacing(8)
-        row_cmds.addWidget(
-            command_button("Rodar processo (Vazio)", "proc_A", task_runner, {"fast": True})
+
+        btn_proc = command_button(
+            "Rodar processo (Vazio)",
+            "proc_A",
+            task_runner,
+            {"fast": True},
+            disable_while_running=True,
+            lock_after_click=False,
+            size_preset="sm",
         )
+        btn_proc.setProperty("size", "sm")
+        btn_proc.setProperty("variant", "primary")
+        _repolish(btn_proc)  # aplica QSS das properties
+        row_cmds.addWidget(btn_proc)
+
+        btn_once = command_button(
+            "Enviar única vez (trava após)",
+            "send_once",
+            task_runner,
+            {"payload": 1},
+            disable_while_running=True,
+            lock_after_click=True,
+            size_preset="sm",
+        )
+        btn_once.setProperty("size", "sm")
+        btn_once.setProperty("variant", "primary")
+        _repolish(btn_once)
+        row_cmds.addWidget(btn_once)
 
         btn_async = AsyncTaskButton(
             "Dormir 5s (assíncrono, com overlay)",
@@ -292,20 +370,23 @@ class HomePage(QWidget):
             overlay_message="Processando dados…"
         )
         btn_async.setProperty("variant", "primary")
+        btn_async.setProperty("size", "md")
+        _repolish(btn_async)
         row_cmds.addWidget(btn_async)
+
         row_cmds.addStretch(1)
         a_lay.addLayout(row_cmds)
 
-        # Toasts
         toast_row = QHBoxLayout()
         toast_row.setSpacing(8)
-        btn_toast_curto = Controls.Button("Toast Curto (5s)")
+        btn_toast_curto = _btn("Toast Curto (5s)", "sm", variant="primary")
         btn_toast_curto.clicked.connect(self._demo_toast_curto)
         toast_row.addWidget(btn_toast_curto)
 
-        btn_toast_andamento = Controls.Button("Toast com Progresso (1→5)")
+        btn_toast_andamento = _btn("Toast com Progresso (1→5)", "sm", variant="primary")
         btn_toast_andamento.clicked.connect(self._demo_toast_contagem)
         toast_row.addWidget(btn_toast_andamento)
+
         toast_row.addStretch(1)
         a_lay.addLayout(toast_row)
 
@@ -316,19 +397,92 @@ class HomePage(QWidget):
         root.addWidget(actions)
 
         # -----------------------------------------------------
-        # Controles diversos
+        # Controles rápidos
         # -----------------------------------------------------
-        ctrls = _section(self, "Controles rápidos")
+        ctrls = _section(
+            content,
+            "Controles rápidos",
+            "Demonstração de presets de tamanho, Expand/Ver mais, Popovers e Slider como progresso."
+        )
         c_lay = ctrls._content.layout()  # type: ignore[attr-defined]
-        c_lay.addWidget(Controls.Toggle(self))
-        c_lay.addWidget(Controls.TextInput("Digite algo…", self))
+
+        # Presets
+        presets_row = QHBoxLayout()
+        presets_row.setSpacing(6)
+        presets_row.addWidget(_btn("A", "char", variant="primary"))
+        for p in ("sm", "md", "lg", "xl"):
+            presets_row.addWidget(_btn(f"Preset {p}", p, variant="primary"))
+        presets_row.addStretch(1)
+        c_lay.addLayout(presets_row)
+
+        # Detalhes expandíveis
+        details = QFrame()
+        dlay = QVBoxLayout(details)
+        dlay.setContentsMargins(0, 0, 0, 0)
+        dlay.setSpacing(4)
+        dlay.addWidget(QLabel("• Linha 1 de detalhes"))
+        dlay.addWidget(QLabel("• Linha 2 de detalhes"))
+        dlay.addWidget(QLabel("• Linha 3 de detalhes"))
+
+        expand = Controls.ExpandMore(
+            details,
+            text_collapsed="Ver mais detalhes",
+            text_expanded="Ver menos detalhes"
+        )
+        c_lay.addWidget(expand)
+
+        # --- Suaviza o "pulo": mantém largura fixa para os dois textos ---
+        _fix_expand_width(expand)
+
+        # Sliders
+        slider_row = QHBoxLayout()
+        slider_row.setSpacing(8)
+
+        s_interactive = Controls.Slider()
+        s_interactive.setRange(0, 100)
+        s_interactive.setValue(30)
+        slider_row.addWidget(QLabel("Slider interativo:"))
+        slider_row.addWidget(s_interactive)
+
+        self.s_progress = Controls.Slider()
+        self.s_progress.setRange(0, 100)
+        self.s_progress.setMode("progress")         # sem interação
+        self.s_progress.setValue(0)
+        self.s_progress.setAttribute(Qt.WA_TransparentForMouseEvents, True)  # blindado
+        slider_row.addWidget(QLabel("Progresso:"))
+        slider_row.addWidget(self.s_progress)
+
+        slider_row.addStretch(1)
+        c_lay.addLayout(slider_row)
+
+        # Anima o progresso em loop
+        self._progress_tick = 0
+        self._progress_timer = QTimer(self)
+        self._progress_timer.timeout.connect(self._tick_progress)
+        self._progress_timer.start(80)  # ~12.5 FPS
+
         root.addWidget(ctrls)
+
+        # -----------------------------------------------------
+        # Lista longa
+        # -----------------------------------------------------
+        scroll_sec = _section(
+            content,
+            "Scroll / Lista longa",
+            "Abaixo um conteúdo grande — use a rolagem global para navegar."
+        )
+        s_lay = scroll_sec._content.layout()  # type: ignore[attr-defined]
+        for i in range(1, 41):
+            s_lay.addWidget(QLabel(f"Item longo #{i} — texto de exemplo para rolagem."))
+        root.addWidget(scroll_sec)
 
         self._toast_scheduled = False
 
-    # ------------------------------------------------------------------
-    # Onboarding toast
-    # ------------------------------------------------------------------
+    # --------- helpers de UI ----------
+    def _tick_progress(self):
+        self._progress_tick = (self._progress_tick + 2) % 101
+        self.s_progress.setValue(self._progress_tick)
+
     def showEvent(self, e):
         super().showEvent(e)
         if not self._toast_scheduled:
@@ -337,15 +491,12 @@ class HomePage(QWidget):
                 0,
                 lambda: show_toast(
                     self.window(),
-                    "Dica: experimente o Quick Open (Ctrl+K) e o breadcrumb.",
+                    "Dica: experimente o Quick Open (Ctrl+K), passe o mouse no texto de dica e use a rolagem.",
                     "info",
                     2600,
                 ),
             )
 
-    # ------------------------------------------------------------------
-    # Demos
-    # ------------------------------------------------------------------
     def _demo_toast_curto(self):
         show_toast(self.window(), "Iniciando tarefa curta…", "info", 1600)
         QTimer.singleShot(
@@ -386,14 +537,30 @@ class HomePage(QWidget):
         return HomePage(task_runner)
 
 
-# Factory
 def build(task_runner=None, theme_service=None):
     return HomePage.build(task_runner=task_runner, theme_service=theme_service)
 
 
-# Runner de exemplo
 class SleepRunner:
     def run_task(self, name: str, payload: dict) -> dict:
         import time
         time.sleep(5)
         return {"ok": True, "code": 1, "data": {"message": "ok"}}
+
+
+# ---------------- internal util ----------------
+def _fix_expand_width(expand_widget: Controls.ExpandMore):
+    """
+    Evita “pulo” do botão Expand/Ver mais quando muda o texto (► / ▼).
+    Calcula a largura máxima entre os dois rótulos e fixa como minimumWidth.
+    """
+    btn = expand_widget.btn
+    fm = QFontMetrics(btn.font())
+    w = max(
+        fm.horizontalAdvance("Ver mais detalhes"),
+        fm.horizontalAdvance("Ver menos detalhes")
+    )
+    # espaço extra para o ícone/caret e padding
+    w += 28
+    btn.setMinimumWidth(w)
+    btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)

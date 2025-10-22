@@ -226,14 +226,40 @@ QPushButton:pressed { background: {btn_hover}; }
 QPushButton:disabled { background: {input_bg}; color: {box_border}; }
 
 /* Variantes */
-QPushButton[variant="primary"]   { background: {accent}; color: {btn_text}; font-weight: 600; }
-QPushButton[variant="primary"]:hover { background: {hover}; }
+QPushButton[variant="primary"]   { background: {btn}; color: {btn_text}; font-weight: 600; }
+QPushButton[variant="primary"]:hover { background: {checkbox}; }
 QPushButton[variant="secondary"] { background: transparent; color: {checkbox}; border: 1.4px solid {checkbox}; }
 QPushButton[variant="secondary"]:hover { background: {hover}; }
 QPushButton[variant="ghost"]     { background: transparent; color: {text}; border: none; }
 QPushButton[variant="ghost"]:hover { background: rgba(255,255,255,0.05); }
-QPushButton[variant="chip"]      { background: {surface}; border: 1px solid {box_border}; border-radius: 16px; padding: 4px 10px; font-size: 11px; }
+
+QPushButton[variant="primary"]:disabled   { background: {input_bg}; color: {box_border}; }
+QPushButton[variant="secondary"]:disabled { background: transparent; color: {box_border}; border: 1.4px solid {box_border}; }
+QPushButton[variant="ghost"]:disabled     { background: transparent; color: {box_border}; }
+
+/* Chip default */
+QPushButton[variant="chip"]      { background: {surface}; color: {text}; border: 1px solid {box_border}; border-radius: 16px; padding: 4px 10px; font-size: 11px; }
 QPushButton[variant="chip"]:hover { background: {accent}; color: {btn_text}; }
+
+/* ===== Novos tamanhos (presets) ===== */
+QPushButton[size="lg"]   { padding: 10px 18px; font-size: 13.5px; border-radius: 10px; }
+QPushButton[size="md"]   { padding: 8px 16px;  font-size: 12.5px; border-radius: 9px;  }
+QPushButton[size="sm"]   { padding: 5px 10px;  font-size: 11.5px; border-radius: 8px;  }
+QPushButton[size="xl"]   { padding: 10px 22px; font-size: 14px;  border-radius: 10px; }
+QPushButton[size="char"] { padding: 4px 8px;   font-size: 12px; }
+
+/* Chip compacto (quando usado com size preset novo) */
+QPushButton[variant="chip"][size="sm"],
+QPushButton[variant="chip"][size="char"] {
+  padding: 3px 10px;
+  font-size: 11.5px;
+  border-radius: 999px;
+  background: transparent;
+  color: {surface};
+  border: 1px solid {box_border};
+}
+QPushButton[variant="chip"][size="sm"]:hover,
+QPushButton[variant="chip"][size="char"]:hover { background: {hover}; }
 
 /* =========================
    CHECKBOX / RADIO
@@ -299,11 +325,15 @@ QSlider::handle:horizontal {
   width: 14px; height: 14px;
   border-radius: 7px;
   margin: -4px 0;
-  transition: all 120ms ease;
 }
 QSlider::handle:horizontal:hover {
   width: 16px; height: 16px;
   margin: -5px 0;
+}
+
+/* Modo “barra de progresso” (UiSlider progressMode) */
+QSlider[progressMode="true"]::handle:horizontal {
+  width: 0; height: 0; margin: 0; background: transparent;
 }
 
 QProgressBar {
@@ -343,10 +373,15 @@ QScrollBar:vertical, QScrollBar:horizontal {
   margin: 0;
 }
 QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
-  background: {box_border};
+  background: {checkbox};
   border-radius: 4px;
   min-height: 20px; min-width: 20px;
 }
+
+QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover {
+  background: {slider};
+}
+
 QScrollBar::add-line, QScrollBar::sub-line,
 QScrollBar::add-page, QScrollBar::sub-page {
   background: transparent;
@@ -451,59 +486,32 @@ QMenu::item:selected {
   border-radius: 6px;
 }
 
-/* container */
-#TopBarBreadcrumbContainer {
-  /* sem padding extra; o HBox já cuida do espaçamento */
-}
+/* ===== Breadcrumb ===== */
+#TopBarBreadcrumbContainer { }
+#BreadcrumbLink { color: palette(window-text); }
+#BreadcrumbLink[hover="true"] { color: {hover}; text-decoration: none; }
+#BreadcrumbCurrent { color: palette(mid); font-weight: 500; }
+#BreadcrumbSeparator { color: palette(mid); }
 
-/* link “texto” */
-#BreadcrumbLink {
-  color: palette(window-text);
-}
-#BreadcrumbLink[hover="true"] {
-  color: {hover};           /* sua cor de hover */
-  text-decoration: none;    /* opcional */
-}
-
-/* atual (não clicável) */
-#BreadcrumbCurrent {
-  color: palette(mid);
-  font-weight: 500;         /* opcional */
-}
-
-/* separador */
-#BreadcrumbSeparator {
-  color: palette(mid);
-}
-
-/* ===== Quick Open: lista estilizada com borda e seleção tipo botão ===== */
-
-/* Remover outlines/focus nativo que gera traço/retícula esquisita */
+/* ===== Quick Open ===== */
 QListView, QListView::item { outline: 0; }
-
-/* Caixa da lista do Quick Open */
 #QuickOpenList {
   background: {surface};
   border: 1px solid {box_border};     /* << contorno da caixa da lista */
   border-radius: 10px;
   padding: 4px;
 }
-
 #QuickOpenList::item {
   padding: 8px 10px;
   margin: 3px 4px;
   border-radius: 8px;
   border: none;
 }
-
-/* Hover suave */
 #QuickOpenList::item:hover {
   background: {hover};
   color: {text};
   border: none;
 }
-
-/* Seleção com cores de botão (nada de “traço rosinha”) */
 #QuickOpenList::item:selected,
 #QuickOpenList::item:selected:active,
 #QuickOpenList::item:selected:!active {
@@ -511,4 +519,32 @@ QListView, QListView::item { outline: 0; }
   color: {btn_text};          /* << texto do botão */
   border: none;               /* remove qualquer focus/linha */
   border-radius: 8px;
+}
+
+/* ==== Popover (widget custom) ==== */
+#Popover {
+  /* cores do popover via qproperties (usadas no paintEvent) */
+  qproperty-bgColor:       {surface};      /* fundo */
+  qproperty-borderColor:   {box_border};   /* contorno */
+  qproperty-borderWidth:   2;              /* px */
+  qproperty-radius:        10;             /* cantos */
+
+  /* texto e padding continuam por QSS normalmente */
+  color: {text};
+  padding: 6px 8px;
+}
+
+/* texto auxiliar dentro do popover */
+#Popover [hint="shortcut"] { color: {checkbox}; }
+
+/* realce sutil em anchors de popover */
+*[hasPopover="true"] { text-decoration: underline dotted; }
+*[hasPopover="true"]:hover { text-decoration: underline; }
+
+/* Painel interno do Expand/Ver mais — sólido */
+#ExpandMorePanel {
+  background: {surface};
+  border: 1px solid {box_border};
+  border-radius: 10px;
+  padding: 6px;
 }
