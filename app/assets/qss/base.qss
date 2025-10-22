@@ -488,10 +488,10 @@ QMenu::item:selected {
 
 /* ===== Breadcrumb ===== */
 #TopBarBreadcrumbContainer { }
-#BreadcrumbLink { color: palette(window-text); }
+#BreadcrumbLink { color: {text}; }
 #BreadcrumbLink[hover="true"] { color: {hover}; text-decoration: none; }
-#BreadcrumbCurrent { color: palette(mid); font-weight: 500; }
-#BreadcrumbSeparator { color: palette(mid); }
+#BreadcrumbCurrent { color: {box_border}; font-weight: 500; }
+#BreadcrumbSeparator { color: {hover}; }
 
 /* ===== Quick Open ===== */
 QListView, QListView::item { outline: 0; }

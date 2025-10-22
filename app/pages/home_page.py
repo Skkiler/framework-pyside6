@@ -491,7 +491,7 @@ class HomePage(QWidget):
                 0,
                 lambda: show_toast(
                     self.window(),
-                    "Dica: experimente o Quick Open (Ctrl+K), passe o mouse no texto de dica e use a rolagem.",
+                    "Dica: experimente o Quick Open (Ctrl+K).",
                     "info",
                     2600,
                 ),
