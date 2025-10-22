@@ -1,12 +1,15 @@
 # ui/pages/home_page.py
 
 from __future__ import annotations
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame, QHBoxLayout
+
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QLabel, QFrame, QHBoxLayout, QGridLayout, QSizePolicy
+)
 from PySide6.QtCore import QTimer, Qt
 
 from ui.widgets.buttons import Controls, command_button
 from ui.widgets.async_button import AsyncTaskButton
-from ui.widgets.toast import show_toast, ProgressToast   # novos toasts
+from ui.widgets.toast import show_toast, ProgressToast
 
 PAGE = {
     "route": "home",
@@ -16,48 +19,60 @@ PAGE = {
 }
 
 # ------------------------------------------------------------
-# Helpers visuais simples para seções
+# Helpers visuais
 # ------------------------------------------------------------
-def _section(parent: QWidget, title: str) -> QFrame:
+def _section(parent: QWidget, title: str, subtitle: str | None = None) -> QFrame:
     """
-    Cria um 'card' (QFrame) com título, usando o QSS:
-      QWidget[elevation="panel"] { ... }
+    Card de conteúdo com título (e opcionalmente subtítulo).
     """
     frame = QFrame(parent)
     frame.setProperty("elevation", "panel")
+
     outer = QVBoxLayout(frame)
-    outer.setContentsMargins(12, 10, 12, 12)
-    outer.setSpacing(10)
+    outer.setContentsMargins(14, 12, 14, 14)
+    outer.setSpacing(8)
 
-    lbl = QLabel(title, frame)
-    f = lbl.font()
-    f.setPointSize(max(12, f.pointSize()))
+    # Título
+    title_lbl = QLabel(title, frame)
+    f = title_lbl.font()
+    f.setPointSize(max(13, f.pointSize()))
     f.setBold(True)
-    lbl.setFont(f)
-    outer.addWidget(lbl)
+    title_lbl.setFont(f)
+    outer.addWidget(title_lbl)
 
-    # container interno para conteúdo da seção
+    # Subtítulo opcional
+    if subtitle:
+        sub = QLabel(subtitle, frame)
+        sub.setWordWrap(True)
+        sub.setStyleSheet("opacity: 0.85;")
+        outer.addWidget(sub)
+
+    # Conteúdo
     content = QFrame(frame)
     content.setFrameShape(QFrame.NoFrame)
     inner = QVBoxLayout(content)
-    inner.setContentsMargins(0, 0, 0, 0)
-    inner.setSpacing(8)
+    inner.setContentsMargins(0, 4, 0, 0)
+    inner.setSpacing(10)
     outer.addWidget(content)
 
-    # devolve o frame, e o chamador pode acessar .layout() do content
-    # usando um atributo para facilitar:
     content.setObjectName("_section_content")
     frame._content = content  # type: ignore[attr-defined]
     return frame
 
 
+def _chip(text: str) -> Controls.Button:
+    btn = Controls.Button(text)
+    btn.setProperty("variant", "chip")
+    btn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+    return btn
+
+
 # ============================================================
-# Subpágina 1: home/ferramentas
+# Subpágina 1 (embutida): home/ferramentas
 # ============================================================
 class HomeToolsPage(QWidget):
     """
-    Subpágina direta de 'home' (rota: home/ferramentas).
-    Mostra um texto e um botão para abrir a sub-subpágina 'detalhes'.
+    Subpágina direta de 'home' (home/ferramentas) — exemplo de conteúdo e navegação.
     """
     def __init__(self):
         super().__init__()
@@ -65,44 +80,50 @@ class HomeToolsPage(QWidget):
         root.setContentsMargins(14, 14, 14, 14)
         root.setSpacing(12)
 
-        sec = _section(self, "Ferramentas (Subpágina)")
-        lay = sec._content.layout()  # type: ignore[attr-defined]
-        info = QLabel("Você está em: home / ferramentas", self)
-        info.setWordWrap(True)
-        lay.addWidget(info)
+        hero = _section(self, "Ferramentas", "Exemplo de subpágina embutida em home.")
+        lay = hero._content.layout()  # type: ignore[attr-defined]
 
-        btn_go = Controls.Button("Ir para Detalhes (sub-subpágina)", self)
-        btn_go.clicked.connect(lambda: self._go("home/ferramentas/detalhes"))
-        lay.addWidget(btn_go)
+        tips = QLabel("• Use o breadcrumb no topo para voltar rapidamente.\n"
+                      "• Este exemplo também mostra navegação entre níveis.")
+        tips.setWordWrap(True)
+        lay.addWidget(tips)
 
-        # opcional: botão de voltar para home
-        btn_back = Controls.Button("Voltar para Home", self)
-        btn_back.clicked.connect(lambda: self._go("home"))
-        lay.addWidget(btn_back)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        bt1 = Controls.Button("Abrir Detalhes")
+        bt1.setProperty("variant", "primary")
+        bt1.clicked.connect(lambda: self._go("home/ferramentas/detalhes"))
+        row.addWidget(bt1)
 
-        root.addWidget(sec)
+        bt2 = Controls.Button("Voltar à Home")
+        bt2.clicked.connect(lambda: self._go("home"))
+        row.addWidget(bt2)
+
+        row.addStretch(1)
+        lay.addLayout(row)
+
+        root.addWidget(hero)
 
     def _go(self, path: str):
         win = self.window()
-        try:
-            r = getattr(win, "router", None)
-            if r:
+        r = getattr(win, "router", None)
+        if r:
+            try:
                 r.go(path)
-        except Exception as e:
-            print("[WARN] navegação falhou:", e)
+            except Exception as e:
+                print("[WARN] navegação falhou:", e)
 
 
-def build_home_tools(*args, **kwargs) -> QWidget:
-    """Factory para o registry/manifesto — rota: home/ferramentas"""
+def build_home_tools(*_, **__) -> QWidget:
     return HomeToolsPage()
 
 
 # ============================================================
-# Subpágina 2: home/ferramentas/detalhes
+# Subpágina 2 (embutida): home/ferramentas/detalhes
 # ============================================================
 class HomeToolsDetailsPage(QWidget):
     """
-    Sub-subpágina dentro de 'home/ferramentas' (rota: home/ferramentas/detalhes).
+    Sub-subpágina (home/ferramentas/detalhes) — mostra ações e micro-conteúdo.
     """
     def __init__(self):
         super().__init__()
@@ -110,142 +131,194 @@ class HomeToolsDetailsPage(QWidget):
         root.setContentsMargins(14, 14, 14, 14)
         root.setSpacing(12)
 
-        sec = _section(self, "Detalhes das Ferramentas (Sub-subpágina)")
+        sec = _section(self, "Detalhes", "Nível 2 da navegação a partir de ‘Ferramentas’.")
         lay = sec._content.layout()  # type: ignore[attr-defined]
-        info = QLabel("Você está em: home / ferramentas / detalhes", self)
-        info.setWordWrap(True)
-        lay.addWidget(info)
 
-        btn_up = Controls.Button("Voltar para Ferramentas", self)
-        btn_up.clicked.connect(lambda: self._go("home/ferramentas"))
-        lay.addWidget(btn_up)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(6)
 
-        btn_home = Controls.Button("Voltar para Home", self)
-        btn_home.clicked.connect(lambda: self._go("home"))
-        lay.addWidget(btn_home)
+        grid.addWidget(_chip("Breadcrumb"), 0, 0)
+        grid.addWidget(_chip("Histórico"), 0, 1)
+        grid.addWidget(_chip("Ctrl+K"),     0, 2)
+
+        desc = QLabel("Explore como a navegação hierárquica funciona e como o histórico "
+                      "(Alt+←/Alt+→) respeita os passos entre páginas.")
+        desc.setWordWrap(True)
+        grid.addWidget(desc, 1, 0, 1, 3)
+
+        lay.addLayout(grid)
+
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        back = Controls.Button("↩ Voltar")
+        back.clicked.connect(lambda: self._go("home/ferramentas"))
+        row.addWidget(back)
+
+        home = Controls.Button("Início")
+        home.clicked.connect(lambda: self._go("home"))
+        row.addWidget(home)
+        row.addStretch(1)
+        lay.addLayout(row)
 
         root.addWidget(sec)
 
     def _go(self, path: str):
         win = self.window()
-        try:
-            r = getattr(win, "router", None)
-            if r:
+        r = getattr(win, "router", None)
+        if r:
+            try:
                 r.go(path)
-        except Exception as e:
-            print("[WARN] navegação falhou:", e)
+            except Exception as e:
+                print("[WARN] navegação falhou:", e)
 
 
-def build_home_tools_details(*args, **kwargs) -> QWidget:
-    """Factory para o registry/manifesto — rota: home/ferramentas/detalhes"""
+def build_home_tools_details(*_, **__) -> QWidget:
     return HomeToolsDetailsPage()
 
 
 # ============================================================
-# Página Home (raiz)
+# Página Home (raiz) — tutorial bonito
 # ============================================================
 class HomePage(QWidget):
     def __init__(self, task_runner):
         super().__init__()
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 14, 14, 14)
-        root.setSpacing(12)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(14)
 
-        # Cabeçalho amigável
-        hero = _section(self, "Bem-vindo 👋")
+        # -----------------------------------------------------
+        # HERO
+        # -----------------------------------------------------
+        hero = _section(
+            self,
+            "Bem-vindo 👋",
+            "Este projeto traz um shell com Router, TopBar (breadcrumb), histórico, Quick Open (Ctrl+K), "
+            "ThemeService, Settings, toasts e comandos. Esta Home é um guia interativo."
+        )
         hero_lay = hero._content.layout()  # type: ignore[attr-defined]
-        hero_lay.addWidget(QLabel("Esta é a Home. Abaixo você encontra exemplos prontos de botões e toasts."))
+
+        chips = QHBoxLayout()
+        chips.setSpacing(6)
+        for t in ("Router", "Breadcrumb", "Histórico", "Quick Open", "Toasts", "Async"):
+            chips.addWidget(_chip(t))
+        chips.addStretch(1)
+        hero_lay.addLayout(chips)
+
+        cta_row = QHBoxLayout()
+        cta_row.setSpacing(8)
+        goto_tools = Controls.Button("▶ Abrir Ferramentas")
+        goto_tools.setProperty("variant", "primary")
+        goto_tools.clicked.connect(lambda: self._go("home/ferramentas"))
+        cta_row.addWidget(goto_tools)
+
+        goto_guide = Controls.Button("📘 Guia Rápido (Subpágina externa)")
+        goto_guide.clicked.connect(lambda: self._go("home/guia"))
+        cta_row.addWidget(goto_guide)
+
+        cta_row.addStretch(1)
+        hero_lay.addLayout(cta_row)
+
         root.addWidget(hero)
 
-        # =====================================================
-        # Seção: Navegação (subpáginas de teste)
-        # =====================================================
-        nav = _section(self, "Navegação (Subpáginas de Teste)")
+        # -----------------------------------------------------
+        # Navegação (conceitos)
+        # -----------------------------------------------------
+        nav = _section(
+            self,
+            "Navegação & Rotas",
+            "Rotas são hierárquicas (ex.: home/ferramentas/detalhes), o breadcrumb mostra o caminho "
+            "e é clicável. Use Alt+←/Alt+→ para voltar/avançar. A última rota é restaurada ao abrir o app."
+        )
         nav_lay = nav._content.layout()  # type: ignore[attr-defined]
 
-        btn_sub = Controls.Button("Abrir Ferramentas (home/ferramentas)", self)
-        btn_sub.clicked.connect(lambda: self._go("home/ferramentas"))
-        nav_lay.addWidget(btn_sub)
+        nav_buttons = QHBoxLayout()
+        b1 = Controls.Button("Ir para Ferramentas (home/ferramentas)")
+        b1.clicked.connect(lambda: self._go("home/ferramentas"))
+        nav_buttons.addWidget(b1)
 
-        btn_sub2 = Controls.Button("Abrir Detalhes (home/ferramentas/detalhes)", self)
-        btn_sub2.clicked.connect(lambda: self._go("home/ferramentas/detalhes"))
-        nav_lay.addWidget(btn_sub2)
+        b2 = Controls.Button("Ir para Detalhes (home/ferramentas/detalhes)")
+        b2.clicked.connect(lambda: self._go("home/ferramentas/detalhes"))
+        nav_buttons.addWidget(b2)
 
+        nav_buttons.addStretch(1)
+        nav_lay.addLayout(nav_buttons)
+
+        tip_nav = QLabel("Dica: clique nos itens do breadcrumb para saltar direto para um nível específico.")
+        tip_nav.setWordWrap(True)
+        nav_lay.addWidget(tip_nav)
         root.addWidget(nav)
 
-        # =====================================================
-        # Seção: Ações principais (mantendo seus botões)
-        # =====================================================
-        actions = _section(self, "Ações")
+        # -----------------------------------------------------
+        # Quick Open
+        # -----------------------------------------------------
+        qopen = _section(
+            self,
+            "Quick Open (Ctrl+K) — estilizado",
+            "Pressione Ctrl+K para abrir o Quick Open frameless (mesmo tema), filtrando por nome/rota. "
+            "Somente páginas com 'sidebar=True' aparecem."
+        )
+        qopen_lay = qopen._content.layout()  # type: ignore[attr-defined]
+        qopen_lay.addWidget(QLabel("Experimente: digite “Ferramentas” ou “home/…”."))
+        root.addWidget(qopen)
+
+        # -----------------------------------------------------
+        # Ações / Async / Toasts
+        # -----------------------------------------------------
+        actions = _section(
+            self,
+            "Ações e Execução",
+            "Abaixo há exemplos de execução síncrona e assíncrona, com overlay e toasts de feedback."
+        )
         a_lay = actions._content.layout()  # type: ignore[attr-defined]
 
-        # Botão síncrono padrão (já usa Hover “glow”)
-        a_lay.addWidget(
-            command_button(
-                "Rodar processo A (rápido)",
-                "proc_A",
-                task_runner,
-                {"fast": True},
-            )
+        row_cmds = QHBoxLayout()
+        row_cmds.setSpacing(8)
+        row_cmds.addWidget(
+            command_button("Rodar processo A (rápido)", "proc_A", task_runner, {"fast": True})
         )
 
-        # Botão assíncrono – BLOQUEIA a tela com overlay
         btn_async = AsyncTaskButton(
-            "Dormir 5s (assíncrono)",
+            "Dormir 5s (assíncrono, com overlay)",
             SleepRunner(),
             "ignored",
             {},
             parent=self,
             toast_success="Concluído!",
             toast_error="Falhou",
-            # overlay somente quando bloquear — aqui queremos bloquear:
             use_overlay=True,
             block_input=True,
             overlay_parent=self,
             overlay_message="Processando dados…"
         )
-        # Visual: podemos marcar como 'primary' se quiser destacar
         btn_async.setProperty("variant", "primary")
-        a_lay.addWidget(btn_async)
+        row_cmds.addWidget(btn_async)
+        row_cmds.addStretch(1)
+        a_lay.addLayout(row_cmds)
+
+        # Toasts
+        toast_row = QHBoxLayout()
+        toast_row.setSpacing(8)
+        btn_toast_curto = Controls.Button("Toast Curto (5s)")
+        btn_toast_curto.clicked.connect(self._demo_toast_curto)
+        toast_row.addWidget(btn_toast_curto)
+
+        btn_toast_andamento = Controls.Button("Toast com Progresso (1→5)")
+        btn_toast_andamento.clicked.connect(self._demo_toast_contagem)
+        toast_row.addWidget(btn_toast_andamento)
+        toast_row.addStretch(1)
+        a_lay.addLayout(toast_row)
+
+        tip_actions = QLabel("Dica: ProgressToast aceita .set_progress(), .update(curr,total) e .finish().")
+        tip_actions.setWordWrap(True)
+        a_lay.addWidget(tip_actions)
 
         root.addWidget(actions)
 
-        # =====================================================
-        # Seção: Demos de Toasts (notificação & progresso)
-        # =====================================================
-        toasts = _section(self, "Demos de Toasts")
-        t_lay = toasts._content.layout()  # type: ignore[attr-defined]
-
-        # Linha de botões
-        row = QHBoxLayout()
-        row.setSpacing(8)
-
-        # 1) Toast curto -> aguarda 5s -> toast de concluído
-        btn_toast_curto = Controls.Button("Toast Curto (5s)", self)
-        btn_toast_curto.clicked.connect(self._demo_toast_curto)
-        row.addWidget(btn_toast_curto)
-
-        # 2) ProgressToast: contagem 1→5 (1s por passo)
-        btn_toast_andamento = Controls.Button("Toast de Andamento (1→5)", self)
-        btn_toast_andamento.clicked.connect(self._demo_toast_contagem)
-        row.addWidget(btn_toast_andamento)
-
-        # estica para alinhar bonito, caso sobre espaço
-        row.addStretch(1)
-        t_lay.addLayout(row)
-
-        # Dica textual breve
-        tip = QLabel("• As notificações aparecem como janelas flutuantes (frameless) no canto inferior direito.\n"
-                     "• O ProgressToast aceita .set_progress(), .update(curr,total) e .finish().")
-        tip.setWordWrap(True)
-        t_lay.addWidget(tip)
-
-        root.addWidget(toasts)
-
-        # =====================================================
-        # Seção: Controles (exemplos rápidos)
-        # =====================================================
-        ctrls = _section(self, "Controles")
+        # -----------------------------------------------------
+        # Controles diversos
+        # -----------------------------------------------------
+        ctrls = _section(self, "Controles rápidos")
         c_lay = ctrls._content.layout()  # type: ignore[attr-defined]
         c_lay.addWidget(Controls.Toggle(self))
         c_lay.addWidget(Controls.TextInput("Digite algo…", self))
@@ -254,7 +327,7 @@ class HomePage(QWidget):
         self._toast_scheduled = False
 
     # ------------------------------------------------------------------
-    # Toast de onboarding na primeira abertura da página
+    # Onboarding toast
     # ------------------------------------------------------------------
     def showEvent(self, e):
         super().showEvent(e)
@@ -264,33 +337,26 @@ class HomePage(QWidget):
                 0,
                 lambda: show_toast(
                     self.window(),
-                    "Dica: experimente o botão assíncrono",
+                    "Dica: experimente o Quick Open (Ctrl+K) e o breadcrumb.",
                     "info",
-                    2200,
+                    2600,
                 ),
             )
 
     # ------------------------------------------------------------------
-    # DEMOS
+    # Demos
     # ------------------------------------------------------------------
     def _demo_toast_curto(self):
-        """Mostra um toast curto de início; após 5s, mostra 'concluído'."""
         show_toast(self.window(), "Iniciando tarefa curta…", "info", 1600)
-
-        # Sem bloquear a UI: agenda o toast final em 5s
         QTimer.singleShot(
             5000,
             lambda: show_toast(self.window(), "Tarefa curta concluída!", "success", 2000)
         )
 
     def _demo_toast_contagem(self):
-        """
-        Abre um ProgressToast e atualiza de 1 a 5 a cada 1s.
-        Ao fim, fecha com sucesso e opcionalmente mostra um toast curto.
-        """
         total = 5
         pt = ProgressToast.start(self.window(), "Contagem: 0/5…", kind="info", cancellable=False)
-        pt.set_progress(0)  # modo determinado
+        pt.set_progress(0)
 
         state = {"i": 0}
         def tick():
@@ -298,7 +364,6 @@ class HomePage(QWidget):
             i = state["i"]
             pt.update(i, total)
             pt.set_text(f"Contagem: {i}/{total}…")
-
             if i >= total:
                 pt.finish(success=True, message="Contagem concluída!")
                 QTimer.singleShot(600, lambda: show_toast(self.window(), "Concluído!", "success", 1600))
@@ -308,27 +373,27 @@ class HomePage(QWidget):
         QTimer.singleShot(1000, tick)
 
     def _go(self, path: str):
-        """Navega usando o Router do AppShell, se disponível."""
         win = self.window()
-        try:
-            r = getattr(win, "router", None)
-            if r:
+        r = getattr(win, "router", None)
+        if r:
+            try:
                 r.go(path)
-        except Exception as e:
-            print("[WARN] navegação falhou:", e)
+            except Exception as e:
+                print("[WARN] navegação falhou:", e)
 
-    # ------------------------------------------------------------------
     @staticmethod
     def build(task_runner=None, theme_service=None):
         return HomePage(task_runner)
 
-# ====== FACTORY para o registry ======
+
+# Factory
 def build(task_runner=None, theme_service=None):
     return HomePage.build(task_runner=task_runner, theme_service=theme_service)
 
-# Runner usado pelo botão assíncrono
+
+# Runner de exemplo
 class SleepRunner:
     def run_task(self, name: str, payload: dict) -> dict:
         import time
-        time.sleep(5)                 # “trabalho”
+        time.sleep(5)
         return {"ok": True, "code": 1, "data": {"message": "ok"}}

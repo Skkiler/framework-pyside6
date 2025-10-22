@@ -1,15 +1,22 @@
 [
   {
-    "route": "Home",
-    "label": "Ínicio",
+    "route": "home",
+    "label": "Início",
     "sidebar": true,
     "order": 0,
     "factory": "app.pages.home_page:build"
   },
   {
+    "route": "home/guia",
+    "label": "Guia Rápido",
+    "sidebar": true,
+    "order": 5,
+    "factory": "app.pages.subpages.guia_rapido_page:build"
+  },
+  {
     "route": "home/ferramentas",
     "label": "Ferramentas",
-    "sidebar": true,
+    "sidebar": false,
     "order": 10,
     "factory": "app.pages.home_page:build_home_tools"
   },
@@ -19,20 +26,5 @@
     "sidebar": false,
     "order": 11,
     "factory": "app.pages.home_page:build_home_tools_details"
-  },
-  {
-    "route": "home/tools2",
-    "label": "Ferramentas (Ext)",
-    "sidebar": true,
-    "order": 12,
-    "factory": "app.pages.subpages.tools_page:build"
-  },
-  {
-    "route": "home/tools2/detalhes",
-    "label": "Detalhes (Ext)",
-    "sidebar": false,
-    "order": 13,
-    "factory": "app.pages.subpages.tools_details_page:build"
   }
-
 ]
