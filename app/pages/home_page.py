@@ -275,7 +275,7 @@ class HomePage(QWidget):
         row_cmds = QHBoxLayout()
         row_cmds.setSpacing(8)
         row_cmds.addWidget(
-            command_button("Rodar processo A (rápido)", "proc_A", task_runner, {"fast": True})
+            command_button("Rodar processo (Vazio)", "proc_A", task_runner, {"fast": True})
         )
 
         btn_async = AsyncTaskButton(

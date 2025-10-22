@@ -5,17 +5,17 @@
     "bg": "#000000",
     "surface": "#1a1111",
     "text": "#e5e5e5",
-    "input_bg": "#181413",
+    "text_hover": "#eed0ce",
     "btn": "#440d0d",
     "btn_hover": "#a61111",
     "btn_text": "#f1f1f1",
+    "hover": "#e11717",
+    "accent": "#a61111",
+    "input_bg": "#181413",
+    "box_border": "#700508",
     "checkbox": "#ff1a1a",
     "slider": "#ff1a1a",
     "cond_selected": "#4b0607",
-    "box_border": "#2f0203",
-    "hover": "#e11717",
-    "text_hover": "#eed0ce",
-    "window_bg": "#2f2f2f",
-    "accent": "#a61111"
+    "window_bg": "#2f2f2f"
   }
 }
