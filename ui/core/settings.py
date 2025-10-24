@@ -44,3 +44,21 @@ class Settings:
     @property
     def path(self) -> Path:
         return self._path
+
+    # -------- helpers gerais --------
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._data.get(key, default)
+
+    def set(self, key: str, value: Any) -> None:
+        self._data[key] = value
+        self._save()
+
+    def get_bool(self, key: str, default: bool = False) -> bool:
+        v = self._data.get(key, default)
+        return bool(v)
+
+    def get_int(self, key: str, default: int = 0) -> int:
+        try:
+            return int(self._data.get(key, default))
+        except Exception:
+            return int(default)

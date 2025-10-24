@@ -15,13 +15,18 @@ from .settings import Settings
 from .theme_service import ThemeService
 from .frameless_window import FramelessWindow
 
+from ui.services.theme_repository_json import JsonThemeRepository
+
 from ui.widgets.topbar import TopBar
 from ui.widgets.overlay_sidebar import OverlaySidePanel
-from ui.services.theme_repository_json import JsonThemeRepository
+from ui.widgets.push_sidebar import PushSidePanel
 from ui.widgets.titlebar import TitleBar
+from ui.widgets.toast import notification_bus
 from ui.widgets.settings_sidebar import SettingsSidePanel
+
 from ui.core.utils.factories import call_with_known_kwargs
 
+from app.pages.notificacoes import NotificationCenter
 from app.pages.settings import build as build_settings_page
 
 try:
@@ -66,11 +71,11 @@ class AppShell(FramelessWindow):
         # Sincroniza ícone com o tema (titlebar + taskbar)
         self._setup_theme_icon_sync()
 
-        # Sidebar (navegação)
+        # Sidebar (navegação overlay tradicional)
         self.sidebar = OverlaySidePanel(parent=central, use_scrim=True, close_on_scrim=True, close_on_select=True)
         self.sidebar.pageSelected.connect(self._go)
 
-        # Sidebar (configurações)
+        # Sidebar (configurações overlay)
         self._settings_widget = build_settings_page(theme_service=self.theme_service)
         self.settings_panel = SettingsSidePanel(
             parent=central,
@@ -78,6 +83,31 @@ class AppShell(FramelessWindow):
             use_scrim=True,
             close_on_scrim=True,
         )
+
+        # ===== Centro de Notificações — PUSH SIDEBAR à direita =====
+        # Conteúdo do centro
+        self._notif_center = NotificationCenter(self)
+
+        self._notif_panel = PushSidePanel(
+            parent=self._central_widget.parent(),
+            content=self._notif_center,
+            title="Notificações",
+            width=360,
+        )
+
+        if hasattr(self, "_content_hbox") and self._content_hbox is not None:
+            self._content_hbox.addWidget(self._notif_panel)
+        else:
+            print("[WARN] Layout _content_hbox não existe, notificações não visíveis!")
+
+        # Conexões TopBar ↔ Notificações
+        self.topbar.openNotificationsRequested.connect(self._notif_panel.toggle)
+        # “Limpar” pela TopBar → tenta limpar concluídas pela API da página; fallback: limpar tudo via bus
+        self.topbar.clearNotificationsRequested.connect(self._clear_notifications_from_topbar)
+
+        # Atualiza badge conforme entradas mudam
+        if hasattr(self._notif_center, "countChanged"):
+            self._notif_center.countChanged.connect(self.topbar.setUnreadCountRequested.emit)
 
         # Dicionário de rotas -> labels (preenchido ao registrar páginas)
         self._page_labels: dict[str, str] = {}
@@ -89,6 +119,7 @@ class AppShell(FramelessWindow):
     def _build_central(self, title: str) -> QWidget:
         central = QWidget()
         central.setProperty("role", "content")
+        self._central_widget = central  # guardamos para o push panel
 
         root_v = QVBoxLayout(central)
         root_v.setContentsMargins(0, 0, 0, 0)
@@ -105,14 +136,20 @@ class AppShell(FramelessWindow):
         # Topbar (inicialmente sem título; será atualizado conforme página)
         self.topbar = TopBar(onHamburgerClick=self._toggle_sidebar, title=None)
         self.topbar.breadcrumbClicked.connect(self._go)
+        # Clique no botão de “mais” abre o centro de notificações também
+        try:
+            self.topbar.btn_more.clicked.connect(self.topbar.openNotificationsRequested.emit)  # type: ignore[attr-defined]
+        except Exception:
+            pass
         root_v.addWidget(self.topbar)
 
-        # Router (conteúdo principal)
+        # Router (conteúdo principal) + espaço para o push sidebar à direita
         content = QHBoxLayout()
         content.setContentsMargins(0, 0, 0, 0)
         content.setSpacing(0)
         root_v.addLayout(content)
         content.addWidget(self.router)
+        self._content_hbox = content  # guardamos para inserir o PushSidePanel depois
 
         # --- Atalhos globais ---
         try:
@@ -257,6 +294,17 @@ class AppShell(FramelessWindow):
             dlg.exec()  # modal real com animação (FramelessDialog)
         except Exception as e:
             print("[WARN] QuickOpen indisponível:", e)
+
+    # ---------------------- Notificações: helpers ----------------------
+
+    def _clear_notifications_from_topbar(self):
+        try:
+            if hasattr(self._notif_center, "clear_finished_public"):
+                self._notif_center.clear_finished_public()  # type: ignore[attr-defined]
+            else:
+                notification_bus().removeEntry.emit("__all__")
+        except Exception:
+            notification_bus().removeEntry.emit("__all__")
 
     # ---------------------- ÍCONE DO APP SINCRONIZADO COM TEMA ----------------------
 

@@ -435,12 +435,12 @@ QFrame#LoadingPanel QLabel { color: {btn_text}; }
 #TitlebarSettingsButton {
   border: 1px solid palette(mid);
   background: transparent;
-  color: palette(window-text);
+  color: {text};
   padding: 3px 7px;
   border-radius: 6px;
 }
-#TitlebarSettingsButton:hover  { border-color: palette(highlight); background: rgba(255,255,255,0.06); }
-#TitlebarSettingsButton:pressed{ background: rgba(255,255,255,0.12); }
+#TitlebarSettingsButton:hover  { border-color: {box_border}; background: {btn_hover}; }
+#TitlebarSettingsButton:pressed{ background: {accent}; }
 
 /* Botão de 3 pontinhos (depois da combo) */
 #TinyMenuButton {
@@ -498,7 +498,7 @@ QListView, QListView::item { outline: 0; }
 #QuickOpenList {
   background: {surface};
   border: 1px solid {box_border};     /* << contorno da caixa da lista */
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 4px;
 }
 #QuickOpenList::item {
@@ -547,4 +547,86 @@ QListView, QListView::item { outline: 0; }
   border: 1px solid {box_border};
   border-radius: 10px;
   padding: 6px;
+}
+
+/* Remove a setinha de menu dos botões com menu */
+QToolButton::menu-indicator {
+  image: none;
+  width: 0;
+  height: 0;
+}
+
+/* Botões de ação rápida dentro do toast */
+#ToastActionButton {
+  background: {btn};
+  color: {btn_text};
+  border: {box_border};
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+#ToastActionButton:hover {
+  background: {btn_hover};
+}
+
+/* ===== Notification Center (sidebar) ===== */
+#NotificationCenter {
+  background: transparent;
+}
+
+/* Painel “carta” que envolve header + lista */
+#NotificationPanel {
+  background: {content_bg};              /* fundo transparente como você pediu */
+  border: 1px solid {box_border};       /* contorno */
+  border-radius: 12px;                  /* cantos arredondados */
+  padding: 0;                           /* já controlamos pelo layout */
+}
+
+#PushSidePanel {
+  background: {content_bg};
+  border-left: 1px solid {box_border};
+  border-top-left-radius: 8px;
+  border-bottom-left-radius: 12px;
+}
+#PushSidePanelHeader {
+  background: {content_bg};
+  color: {text};
+  border-bottom: 1px solid {box_border};
+}
+
+/* Notification Center */
+#NotificationList {
+  /* a lista é “container” apenas */
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+#NotificationList::item {
+  /* sem visual/sem padding — o card é o próprio _Row */
+  background: transparent;
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* O pill (cartão) real é o widget _Row */
+#NotificationRow {
+  background: {btn};
+  border: 1px solid {box_border};
+  border-radius: 12px;
+}
+
+#NotificationRow:hover {
+  background: {hover};
+}
+
+/* Evita paddings extras na label interna */
+#NotificationRow QLabel {
+  padding: 0;
+}
+
+
+#ToastFrame[toast="true"] {
+    border-radius: 12px;
 }

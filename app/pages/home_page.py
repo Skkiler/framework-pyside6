@@ -5,12 +5,18 @@ from __future__ import annotations
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QFrame, QHBoxLayout, QGridLayout, QSizePolicy
 )
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QTimer, Qt, QDateTime
 from PySide6.QtGui import QFontMetrics
 
 from ui.widgets.buttons import Controls, command_button, attach_popover
 from ui.widgets.async_button import AsyncTaskButton
 from ui.widgets.toast import show_toast, ProgressToast
+
+# <<< NOVO: tentar usar o barramento do centro de notificações (failsafe) >>>
+try:
+    from ui.widgets.toast import notification_bus  # pode não existir em versões antigas
+except Exception:
+    notification_bus = None
 
 
 PAGE = {
@@ -19,6 +25,55 @@ PAGE = {
     "sidebar": True,
     "order": 0,
 }
+
+
+# ------------------------------------------------------------
+# Helpers de integração com a caixa de notificações
+# ------------------------------------------------------------
+def _new_id(prefix: str = "home") -> str:
+    return f"{prefix}-{QDateTime.currentMSecsSinceEpoch()}"
+
+
+def _notify_center_create(kind: str, title: str, text: str, *, sticky: bool, ttl_ms: int | None, ref_id: str) -> None:
+    """Cria uma entrada no Centro de Notificações (se disponível)."""
+    try:
+        bus = notification_bus() if callable(notification_bus) else None
+        if bus and hasattr(bus, "addEntry"):
+            payload = {
+                "id": ref_id,
+                "kind": kind,
+                "title": title,
+                "text": text,
+                "sticky": bool(sticky),
+            }
+            if ttl_ms is not None:
+                payload["ttl_ms"] = int(ttl_ms)
+            bus.addEntry.emit(payload)
+    except Exception:
+        pass
+
+
+def _notify_center_update(ref_id: str, **fields) -> None:
+    """Atualiza uma entrada existente (se API estiver disponível)."""
+    try:
+        bus = notification_bus() if callable(notification_bus) else None
+        if bus and hasattr(bus, "updateEntry"):
+            data = {"id": ref_id}
+            data.update(fields)
+            bus.updateEntry.emit(data)
+    except Exception:
+        pass
+
+
+def _notify_center_remove(ref_id: str) -> None:
+    """Remove uma entrada (se disponível)."""
+    try:
+        bus = notification_bus() if callable(notification_bus) else None
+        if bus and hasattr(bus, "removeEntry"):
+            bus.removeEntry.emit(ref_id)
+    except Exception:
+        pass
+
 
 # ------------------------------------------------------------
 # Helpers visuais
@@ -64,33 +119,27 @@ def _chip(text: str) -> Controls.Button:
     btn.setProperty("variant", "chip")
     btn.setProperty("size", "sm")
     btn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-    # mantém consistência imediata do QSS
     _repolish(btn)
     return btn
 
 
 def _btn(text: str, preset: str = "md", *, variant: str | None = None) -> Controls.Button:
-    """
-    Cria botão garantindo o dynamic property `size` (exigido pelo QSS)
-    e, se informado, define a variante (primary/secondary/ghost).
-    """
     b = Controls.Button(text, size_preset=preset)
     b.setProperty("size", preset)
     if variant:
         b.setProperty("variant", variant)
-    _repolish(b)   # aplica o QSS imediatamente
+    _repolish(b)
     return b
 
 
 def _repolish(w: QWidget) -> None:
-    """Força reaplicação de QSS quando setamos dynamic properties em runtime."""
     s = w.style()
     s.unpolish(w)
     s.polish(w)
 
 
 # ============================================================
-# Subpágina 1 (embutida): home/ferramentas
+# Subpáginas embutidas
 # ============================================================
 class HomeToolsPage(QWidget):
     def __init__(self):
@@ -114,7 +163,7 @@ class HomeToolsPage(QWidget):
         bt1.clicked.connect(lambda: self._go("home/ferramentas/detalhes"))
         row.addWidget(bt1)
 
-        bt2 = _btn("Voltar à Home", "sm")  # default preenchido
+        bt2 = _btn("Voltar à Home", "sm")
         row.addWidget(bt2)
         bt2.clicked.connect(lambda: self._go("home"))
 
@@ -137,9 +186,6 @@ def build_home_tools(*_, **__) -> QWidget:
     return HomeToolsPage()
 
 
-# ============================================================
-# Subpágina 2 (embutida): home/ferramentas/detalhes
-# ============================================================
 class HomeToolsDetailsPage(QWidget):
     def __init__(self):
         super().__init__()
@@ -195,7 +241,7 @@ def build_home_tools_details(*_, **__) -> QWidget:
 
 
 # ============================================================
-# Página Home (raiz) — com Scroll global e popover atrelado
+# Página Home (raiz)
 # ============================================================
 class HomePage(QWidget):
     def __init__(self, task_runner):
@@ -233,7 +279,6 @@ class HomePage(QWidget):
             "ThemeService, Settings, toasts e comandos. Esta Home é um guia interativo."
         )
         hero_lay = hero._content.layout()  # type: ignore[attr-defined]
-
 
         chips = QHBoxLayout()
         chips.setSpacing(6)
@@ -309,10 +354,8 @@ class HomePage(QWidget):
             "Ctrl+K"
         )
 
-        # Marca para QSS (sublinhado pontilhado) e reaplica estilo
         lbl_hint.setProperty("hasPopover", True)
         _repolish(lbl_hint)
-
         root.addWidget(qopen)
 
         # -----------------------------------------------------
@@ -339,7 +382,7 @@ class HomePage(QWidget):
         )
         btn_proc.setProperty("size", "sm")
         btn_proc.setProperty("variant", "primary")
-        _repolish(btn_proc)  # aplica QSS das properties
+        _repolish(btn_proc)
         row_cmds.addWidget(btn_proc)
 
         btn_once = command_button(
@@ -406,7 +449,6 @@ class HomePage(QWidget):
         )
         c_lay = ctrls._content.layout()  # type: ignore[attr-defined]
 
-        # Presets
         presets_row = QHBoxLayout()
         presets_row.setSpacing(6)
         presets_row.addWidget(_btn("A", "char", variant="primary"))
@@ -415,7 +457,6 @@ class HomePage(QWidget):
         presets_row.addStretch(1)
         c_lay.addLayout(presets_row)
 
-        # Detalhes expandíveis
         details = QFrame()
         dlay = QVBoxLayout(details)
         dlay.setContentsMargins(0, 0, 0, 0)
@@ -431,10 +472,8 @@ class HomePage(QWidget):
         )
         c_lay.addWidget(expand)
 
-        # --- Suaviza o "pulo": mantém largura fixa para os dois textos ---
         _fix_expand_width(expand)
 
-        # Sliders
         slider_row = QHBoxLayout()
         slider_row.setSpacing(8)
 
@@ -446,20 +485,19 @@ class HomePage(QWidget):
 
         self.s_progress = Controls.Slider()
         self.s_progress.setRange(0, 100)
-        self.s_progress.setMode("progress")         # sem interação
+        self.s_progress.setMode("progress")
         self.s_progress.setValue(0)
-        self.s_progress.setAttribute(Qt.WA_TransparentForMouseEvents, True)  # blindado
+        self.s_progress.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         slider_row.addWidget(QLabel("Progresso:"))
         slider_row.addWidget(self.s_progress)
 
         slider_row.addStretch(1)
         c_lay.addLayout(slider_row)
 
-        # Anima o progresso em loop
         self._progress_tick = 0
         self._progress_timer = QTimer(self)
         self._progress_timer.timeout.connect(self._tick_progress)
-        self._progress_timer.start(80)  # ~12.5 FPS
+        self._progress_timer.start(80)
 
         root.addWidget(ctrls)
 
@@ -497,31 +535,79 @@ class HomePage(QWidget):
                 ),
             )
 
+    # ------------------ DEMOS COM “PERMANÊNCIA” ------------------
+
     def _demo_toast_curto(self):
+        """
+        Exemplo: tarefa curta.
+        - Toast visual rápido + entrada no Centro (TTL curto).
+        - Ao concluir, atualiza para 'success' e deixa expirar.
+        """
+        # Toast visual imediato
         show_toast(self.window(), "Iniciando tarefa curta…", "info", 1600)
-        QTimer.singleShot(
-            5000,
-            lambda: show_toast(self.window(), "Tarefa curta concluída!", "success", 2000)
+
+        # Entrada temporária no Centro
+        ref_id = _new_id("short")
+        _notify_center_create(
+            kind="info",
+            title="Tarefa curta",
+            text="Iniciando…",
+            sticky=False,
+            ttl_ms=6000,   # fica lá por 6s mesmo que o toast feche
+            ref_id=ref_id,
         )
 
+        def _done():
+            show_toast(self.window(), "Tarefa curta concluída!", "success", 2000)
+            # Atualiza a entrada (deixa o mesmo TTL correr)
+            _notify_center_update(ref_id, kind="success", title="Tarefa curta", text="Concluída!")
+
+        QTimer.singleShot(5000, _done)
+
     def _demo_toast_contagem(self):
+        """
+        Exemplo: progresso 1→5.
+        - Entrada no Centro é criada e atualizada a cada tick.
+        - Ao finalizar, vira 'success' e pode permanecer (sticky=True) ou expirar.
+        """
         total = 5
         pt = ProgressToast.start(self.window(), "Contagem: 0/5…", kind="info", cancellable=False)
         pt.set_progress(0)
 
+        # Entrada no Centro com “permanência” durante o progresso
+        ref_id = _new_id("count")
+        _notify_center_create(
+            kind="info",
+            title="Contagem",
+            text="0/5…",
+            sticky=True,   # permanece visível até terminar
+            ttl_ms=None,   # sem TTL enquanto em andamento
+            ref_id=ref_id,
+        )
+
         state = {"i": 0}
+
         def tick():
             state["i"] += 1
             i = state["i"]
             pt.update(i, total)
-            pt.set_text(f"Contagem: {i}/{total}…")
+            msg = f"Contagem: {i}/{total}…"
+            pt.set_text(msg)
+            # Atualiza entrada no Centro
+            _notify_center_update(ref_id, text=f"{i}/{total}…")
+
             if i >= total:
                 pt.finish(success=True, message="Contagem concluída!")
-                QTimer.singleShot(600, lambda: show_toast(self.window(), "Concluído!", "success", 1600))
+                # Marca como concluído e agora deixa com TTL curto (ex.: 6s)
+                _notify_center_update(ref_id, kind="success", text="Concluída!")
+                # se quiser que permaneça indefinidamente, comente a linha abaixo
+                _notify_center_update(ref_id, ttl_ms=6000, sticky=False)
             else:
                 QTimer.singleShot(1000, tick)
 
         QTimer.singleShot(1000, tick)
+
+    # ------------------------------------------------------------
 
     def _go(self, path: str):
         win = self.window()
@@ -550,17 +636,12 @@ class SleepRunner:
 
 # ---------------- internal util ----------------
 def _fix_expand_width(expand_widget: Controls.ExpandMore):
-    """
-    Evita “pulo” do botão Expand/Ver mais quando muda o texto (► / ▼).
-    Calcula a largura máxima entre os dois rótulos e fixa como minimumWidth.
-    """
     btn = expand_widget.btn
     fm = QFontMetrics(btn.font())
     w = max(
         fm.horizontalAdvance("Ver mais detalhes"),
         fm.horizontalAdvance("Ver menos detalhes")
     )
-    # espaço extra para o ícone/caret e padding
     w += 28
     btn.setMinimumWidth(w)
     btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)

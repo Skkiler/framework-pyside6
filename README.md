@@ -1,56 +1,53 @@
 # UI Exec Framework (PySide6)
 
-> Framework modular para criação de interfaces desktop em **Python + PySide6**, com arquitetura extensível, roteamento dinâmico, temas configuráveis (QSS + JSON), injeção de dependências e CLI para scaffolding de páginas.
+Framework modular para criação de interfaces desktop em Python + PySide6, com janela frameless, roteamento, temas (QSS + JSON), toasts, centro de notificações, CLI e arquitetura extensível.
 
 ---
 
 ## Sumário
-- [1. Visão Geral](#1-visão-geral)
-- [2. Arquitetura e Estrutura](#2-arquitetura-e-estrutura)
-  - [2.1. Mapa de Diretórios](#21-mapa-de-diretórios)
-  - [2.2. Fluxo de Inicialização](#22-fluxo-de-inicialização)
-  - [2.3. Componentes Principais](#23-componentes-principais)
-- [3. Dependências e Instalação](#3-dependências-e-instalação)
-- [4. Execução do Aplicativo](#4-execução-do-aplicativo)
-- [5. Criação e Registro de Páginas](#5-criação-e-registro-de-páginas)
-  - [5.1. Manifesto (JSON)](#51-manifesto-json)
-  - [5.2. Autodescoberta (`app/pages`)](#52-autodescoberta-apppages)
-  - [5.3. Injeção de Dependências](#53-injeção-de-dependências)
-- [6. Sistema de Temas (QSS + JSON)](#6-sistema-de-temas-qss--json)
-  - [6.1. Tokens e Estrutura](#61-tokens-e-estrutura)
-  - [6.2. Criando e Editando Temas](#62-criando-e-editando-temas)
-- [7. Execução de Tarefas e Toasts](#7-execução-de-tarefas-e-toasts)
-- [8. CLI e Automação](#8-cli-e-automação)
-- [9. Widgets Incluídos](#9-widgets-incluídos)
-- [10. Tutoriais e Exemplos Práticos](#10-tutoriais-e-exemplos-práticos)
-  - [10.1. Criando uma Nova Página](#101-criando-uma-nova-página)
-  - [10.2. Criando um Novo Tema](#102-criando-um-novo-tema)
-  - [10.3. Integrando um Runner Personalizado](#103-integrando-um-runner-personalizado)
-- [11. Boas Práticas](#11-boas-práticas)
-- [12. Roadmap e Extensões Futuras](#12-roadmap-e-extensões-futuras)
+- [Visão Geral](#visão-geral)
+- [Arquitetura](#arquitetura)
+- [Execução e Atalhos](#execução-e-atalhos)
+- [Páginas e Roteamento](#páginas-e-roteamento)
+- [Temas (QSS + JSON)](#temas-qss--json)
+- [Toasts e Notificações](#toasts-e-notificações)
+- [CLI](#cli)
+- [Widgets Inclusos](#widgets-inclusos)
+- [Tutoriais Rápidos](#tutoriais-rápidos)
+- [Boas Práticas](#boas-práticas)
+- [Roadmap](#roadmap)
 
 ---
 
-## 1. Visão Geral
-
-O **UI Exec Framework** fornece uma base sólida e reutilizável para desenvolvimento de aplicações desktop modernas com **PySide6**, priorizando modularidade, produtividade e escalabilidade.  
+## Visão Geral
 
 Principais recursos:
 
-- **Janela Frameless** com sombra e cantos arredondados.  
-- **Roteamento de páginas** com `Router` e suporte a autodescoberta.  
-- **Sistema de temas** dinâmico via **QSS + JSON** com tokens reutilizáveis.  
-- **Splash Screen** opcional e personalizável.  
-- **Toasts de notificação e progresso** integrados.  
-- **CLI para scaffolding** de páginas e componentes.  
-- **Injeção de dependências** em fábricas de páginas.  
-- **Hot-reload de temas e QSS** em tempo real.  
+- Janela frameless com sombra e cantos arredondados.
+- Roteamento de páginas com auto‑descoberta e manifesto.
+- Sistema de temas dinâmico via QSS + JSON, com animação suave entre temas.
+- Quick Open (Ctrl+K) para navegar por rotas rapidamente.
+- Breadcrumb clicável na TopBar + badge de notificações.
+- Centro de Notificações em painel lateral (push) integrado aos toasts.
+- Toasts simples, com ações e com progresso, integrados ao Centro.
+- Configurações persistentes (tema e última rota) em cache JSON.
+- CLI para scaffolding de páginas.
+- Injeção de dependências (task_runner, theme_service) em páginas.
+
+Novidades (resumo):
+
+- Router v2 com rotas hierárquicas (ex.: `home/ferramentas/detalhes`), histórico (Alt+Left/Alt+Right), sinal `routeChanged` e hook `on_route(params)` por página.
+- Quick Open (Ctrl+K) via `ui/dialogs/quick_open.py`.
+- Centro de Notificações (push à direita) integrado ao `notification_bus()`.
+- ThemeService com watcher de `base.qss` e de temas, tokens derivados e dump do QSS aplicado.
+- Título/ícone: TitleBar com ícone animado (cross‑fade) e sincronização do ícone do app com o tema.
+- TaskRunnerAdapter aceita `async def run_task(...)`.
 
 ---
 
-## 2. Arquitetura e Estrutura
+## Arquitetura
 
-### 2.1. Mapa de Diretórios
+Estrutura de diretórios (principal):
 
 ```
 app/
@@ -58,112 +55,108 @@ app/
   settings.py
   assets/
     icons/
+      app/
+      client/
     qss/
     themes/
     cache/
   pages/
-    home_page.py
-    settings.py
-    theme_editor.py
     base_page.py
+    home_page.py
+    notificacoes.py
     registry.py
+    settings.py
+    subpages/
+      guia_rapido_page.py
+    theme_editor.py
 
 ui/
   core/
-    main.py
     app.py
     app_controller.py
-    router.py
-    theme_service.py
+    command_bus.py
     frameless_window.py
+    interface_ports.py
+    main.py
+    router.py
     settings.py
+    theme_service.py
+    toast_manager.py
     utils/
       factories.py
+      guard.py
       paths.py
-      theme_icon_watcher.py
+  dialogs/
+    quick_open.py
   services/
     qss_renderer.py
-    theme_repository_json.py
     task_runner_adapter.py
-  widgets/
-    toast.py
-    async_button.py
-    buttons.py
-    titlebar.py
-    overlay_sidebar.py
-    loading_overlay.py
+    theme_repository_json.py
   splash/
     splash.py
+  widgets/
+    async_button.py
+    buttons.py
+    loading_overlay.py
+    overlay_sidebar.py
+    push_sidebar.py
+    settings_sidebar.py
+    titlebar.py
+    toast.py
+    topbar.py
 
 requirements.txt
+license
 README.md
 ```
 
-### 2.2. Fluxo de Inicialização
+Componentes de destaque:
 
-1. `ui/core/main.py` inicia o aplicativo via `app.app.main()`.  
-2. `app/app.py` cria a instância `QApplication`, inicializa `AppController` e exibe o **Splash** (opcional).  
-3. `AppController` configura o `AppShell`, carrega páginas e aplica o tema padrão.  
-4. `AppShell` constrói a janela principal com **TopBar**, **Sidebar** e **Router**.  
-
-### 2.3. Componentes Principais
-
-| Componente | Função |
-|-------------|--------|
-| **AppController** | Inicializa e gerencia rotas, temas e instâncias. |
-| **AppShell** | Estrutura visual principal (TopBar, Sidebar, Router). |
-| **Router** | Gerencia a navegação entre páginas. |
-| **ThemeService** | Aplica temas e monitora alterações de QSS/JSON. |
-| **TaskRunnerAdapter** | Interface para execução de tarefas externas. |
-| **Toast / ProgressToast** | Exibe notificações e progresso visual. |
-| **CLI** | Gera páginas e estruturas padrão automaticamente. |
+- Router: rotas hierárquicas, histórico (back/forward), `routeChanged`, hook `on_route(params)` em cada página.
+- ThemeService: anima temas, observa `base.qss`/temas, emite `themeApplied`, `themesChanged`, `themeTokensChanged`.
+- AppShell: TitleBar (ícone animado + engrenagem), TopBar (breadcrumb + sino), Sidebar, Centro de Notificações (push) e Router.
+- Toasts: simples, com ações e com progresso; integrados ao Centro via `notification_bus()`.
+- Settings persistentes: JSON em `app/assets/cache/_ui_exec_settings.json` (tema, última rota, etc.).
 
 ---
 
-## 3. Dependências e Instalação
+## Execução e Atalhos
 
-Requisitos:
-- Python **3.10+**
-- PySide6
+Executar o aplicativo:
 
-Instalação:
-
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
 ```
-
----
-
-## 4. Execução do Aplicativo
-
-```bash
-# Execução recomendada
 python -m ui.core.main
-
-# Alternativas
+# Alternativas:
 python -m app.app
 python ui/core/main.py
 ```
 
-Configurações principais em `app/settings.py`:
+Configurações em `app/settings.py`:
 
-```python
+```
 APP_TITLE = "Meu App"
 DEFAULT_THEME = "Aku"
 FIRST_PAGE = "home"
 ```
 
+Atalhos de teclado:
+
+- Alt+Left / Alt+Right: voltar/avançar no histórico do Router.
+- Ctrl+K: abrir Quick Open (busca/abre rotas).
+- Ctrl+M: minimizar com animação.
+- Ctrl+Enter: maximizar/restaurar.
+
 ---
 
-## 5. Criação e Registro de Páginas
+## Páginas e Roteamento
 
-### 5.1. Manifesto (JSON)
+Formas de registrar páginas:
 
-Defina suas páginas em `app/assets/pages_manifest.json`:
+1) Manifesto JSON (`app/assets/pages_manifest.json`)
 
-```json
+Exemplo:
+
+```
 [
   {
     "route": "home",
@@ -171,58 +164,57 @@ Defina suas páginas em `app/assets/pages_manifest.json`:
     "sidebar": true,
     "order": 0,
     "factory": "app.pages.home_page:build"
+  },
+  {
+    "route": "home/guia",
+    "label": "Guia Rápido",
+    "sidebar": true,
+    "order": 5,
+    "factory": "app.pages.subpages.guia_rapido_page:build"
   }
 ]
 ```
 
-### 5.2. Autodescoberta (`app/pages`)
+2) Auto‑descoberta (`app/pages`)
 
-O framework reconhece automaticamente páginas com `PAGE` e `build(...)`:
+Qualquer módulo com `PAGE` e `build(...)` é detectado; exemplos de metadados aceitos:
 
-```python
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
-
+```
 PAGE = {
-    "route": "relatorios",
-    "label": "Relatórios",
-    "sidebar": True,
-    "order": 10
+  "route": "relatorios",
+  "label": "Relatórios",
+  "sidebar": True,
+  "order": 10
 }
 
 def build(task_runner=None, theme_service=None) -> QWidget:
-    w = QWidget()
-    lay = QVBoxLayout(w)
-    lay.addWidget(QLabel("Página de Relatórios"))
-    return w
+    ...
 ```
 
-### 5.3. Injeção de Dependências
+Injeção de dependências na `build(...)`:
 
-O `AppShell` injeta dependências automaticamente conforme parâmetros aceitos pela função `build(...)`:
+- `task_runner`: executa tarefas de negócio (I/O, rede, etc.).
+- `theme_service`: reage a trocas de tema e fornece tokens.
 
-- `task_runner` — executa tarefas (I/O, rede, etc.)  
-- `theme_service` — reage a trocas de tema e fornece tokens visuais  
+Recursos do Router:
 
-Exemplo:
-
-```python
-def build(task_runner=None, theme_service=None):
-    task_runner.run_task("atualizar_dados", {})
-```
+- `router.go(path, params={})` navega para uma rota (suporta caminhos com `/`).
+- Sinal `routeChanged(path, params)` para persistência/breadcrumb/log.
+- Histórico: `go_back()` / `go_forward()` (atalhos Alt+Left/Alt+Right).
+- Hook por página: defina `on_route(self, params: dict)` no widget da página para reagir a ativações.
 
 ---
 
-## 6. Sistema de Temas (QSS + JSON)
-
-### 6.1. Tokens e Estrutura
+## Temas (QSS + JSON)
 
 Cada tema é composto por:
-- **QSS base:** `app/assets/qss/base.qss`  
-- **JSON de variáveis:** `app/assets/themes/*.json`
+
+- QSS base: `app/assets/qss/base.qss`
+- JSON de variáveis: `app/assets/themes/*.json`
 
 Exemplo de tema:
 
-```json
+```
 {
   "vars": {
     "bg": "#1a1a1a",
@@ -232,36 +224,61 @@ Exemplo de tema:
 }
 ```
 
-### 6.2. Criando e Editando Temas
+ThemeService:
 
-Você pode criar um novo tema:
-1. Duplicando um arquivo `.json` existente em `app/assets/themes`.  
-2. Editando as cores e variáveis desejadas.  
-3. Salvando com um novo nome (ex: `Ocean.json`).  
+- Anima troca de tema (interpolação de cores), com opção de aplicar sem animação.
+- Observa `base.qss` e a pasta de temas; altera em tempo real (hot‑reload).
+- Emite `themeApplied(name)`, `themesChanged(list)`, `themeTokensChanged(dict)`.
+- Persiste tema selecionado em `app/assets/cache/_ui_exec_settings.json`.
 
-O **ThemeService** aplica automaticamente e permite **hot-reload**: alterações no `.json` ou `.qss` são aplicadas em tempo real.
+Editor de temas e painel de configurações:
+
+- Abra o painel (ícone de engrenagem na TitleBar) para selecionar/editar/criar/excluir temas.
+- Persistência via `JsonThemeRepository` (gravação atômica de JSONs).
+- O ícone da janela segue o tema ativo e atualiza automaticamente.
+
+Placeholders no QSS base suportados por `qss_renderer`:
+
+- `{{token}}`, `{token}`, `${token}` com defaults e derivados úteis (ex.: `content_bg`).
 
 ---
 
-## 7. Execução de Tarefas e Toasts
+## Toasts e Notificações
 
-Para integração com lógica de negócio, implemente um runner customizado:
+APIs principais em `ui/widgets/toast.py`:
 
-```python
-class MyRunner:
-    def run_task(self, name, payload):
-        if name == "enviar_email":
-            return {"ok": True, "data": "Enviado com sucesso"}
-        return {"ok": False, "error": "Comando desconhecido"}
+- `show_toast(parent, text, kind="info", timeout_ms=2400, persist=False)`
+- `show_action_toast(parent, title, text, kind="info", actions=[...], sticky=False, timeout_ms=3200, persist=False)`
+- `ProgressToast.start(parent, text, kind="info", cancellable=True)` com `update(...)`/`finish(...)`
+- `notification_bus()` para integração com o Centro de Notificações.
+
+Centro de Notificações (painel push à direita):
+
+- Abre/fecha pela TopBar (sino) e exibe entradas persistidas.
+- Toasts enviados/ocultados podem virar entradas do Centro (com portabilidade de título/texto/flags/ações).
+- Largura redimensionável por “grip”, badge de não lidas na TopBar.
+
+Exemplos:
+
 ```
+from ui.widgets.toast import (
+  show_toast, show_action_toast, ProgressToast, notification_bus
+)
 
-### Toasts e Progresso
+# Toast simples
+show_toast(parent, text="Ação concluída!", kind="info")
 
-```python
-from ui.widgets.toast import Toast, ProgressToast
+# Toast com ações rápidas (aparece na Central ao dispensar)
+t = show_action_toast(
+  parent,
+  title="Exportação",
+  text="Arquivo gerado com sucesso.",
+  kind="ok",
+  actions=[{"label": "Abrir pasta", "command": "abrir_pasta", "payload": {"path": "..."}}],
+  persist=True,
+)
 
-Toast.show(parent, text="Ação concluída!", kind="info")
-
+# Progresso
 pt = ProgressToast.start(parent, "Carregando dados...", kind="info", cancellable=True)
 pt.update(5, 10)
 pt.finish(True, "Processo finalizado!")
@@ -269,94 +286,81 @@ pt.finish(True, "Processo finalizado!")
 
 ---
 
-## 8. CLI e Automação
+## CLI
 
-O **CLI** integrado (`ui/cli.py`) permite gerar páginas rapidamente:
+Geração de páginas via `ui/cli.py`:
 
-```bash
-python -m ui.cli new-page "Relatorios" --route relatorios
+```
+python -m ui.cli new page "Relatorios" --route relatorios
 ```
 
-Isso cria um arquivo em `app/pages/relatorios_page.py` já com `PAGE` e `build()` preenchidos.
+- Cria `ui/pages/relatorios_page.py` com `PAGE` e `build()` preenchidos.
+- Observação: a auto‑descoberta padrão varre `app.pages`. Se você usa `app/pages`, mova o arquivo gerado ou registre via manifesto (`app/assets/pages_manifest.json`).
 
 ---
 
-## 9. Widgets Incluídos
+## Widgets Inclusos
 
-| Widget | Função |
-|---------|--------|
-| **TitleBar** | Barra de título customizada (min/max/close). |
-| **TopBar** | Exibe o título atual e botão de menu lateral. |
-| **OverlaySidePanel** | Sidebar flutuante com scrim. |
-| **SettingsSidePanel** | Painel lateral direito. |
-| **LoadingOverlay** | Overlay de carregamento (GIF). |
-| **Toast / ProgressToast** | Notificações flutuantes. |
-| **AsyncButton** | Executa tarefas assíncronas com feedback visual. |
+- TitleBar: barra de título com ícone animado, botões min/max/close e engrenagem.
+- TopBar: breadcrumb clicável, sino com badge e menu.
+- OverlaySidePanel: menu lateral (overlay) com scrim.
+- SettingsSidePanel: painel de configurações (direita).
+- PushSidePanel: painel lateral direito (Centro de Notificações), redimensionável.
+- LoadingOverlay: overlay de carregamento sensível ao tema (GIF).
+- Toast / ActionToast / ProgressToast: notificações flutuantes integradas ao Centro.
+- AsyncButton: execução assíncrona com feedback visual.
+- QuickOpenDialog: busca/abre rotas (Ctrl+K).
 
 ---
 
-## 10. Tutoriais e Exemplos Práticos
+## Tutoriais Rápidos
 
-### 10.1. Criando uma Nova Página
+Criar página
 
-```bash
-python -m ui.cli new-page "Financeiro" --route financeiro
+```
+python -m ui.cli new page "Financeiro" --route financeiro
 ```
 
-Isso gera automaticamente:
+A `build(task_runner=None, theme_service=None)` recebe dependências úteis já injetadas.
 
-```python
-PAGE = {"route": "financeiro", "label": "Financeiro", "sidebar": True, "order": 2}
+Criar tema
 
-def build(task_runner=None, theme_service=None):
-    ...
+1. Duplique um tema existente (`app/assets/themes/Dark.json`).
+2. Renomeie (ex.: `MyTheme.json`) e ajuste cores.
+3. Selecione no painel de configurações (engrenagem na TitleBar).
+
+Integrar TaskRunner personalizado
+
 ```
-
-### 10.2. Criando um Novo Tema
-
-1. Duplique um tema existente (`Dark.json`).  
-2. Renomeie para `MyTheme.json`.  
-3. Altere as cores desejadas.  
-4. Selecione o tema em **Configurações > Tema**.  
-
-### 10.3. Integrando um Runner Personalizado
-
-No arquivo `app/app.py`:
-
-```python
 from ui.services.task_runner_adapter import TaskRunnerAdapter
 
 class MyRunner:
-    def run_task(self, name, payload):
-        if name == "calcular_relatorio":
-            return {"ok": True, "data": "Relatório gerado"}
-        return {"ok": False, "error": "Ação inválida"}
+  def run_task(self, name, payload):
+    if name == "calcular_relatorio":
+      return {"ok": True, "data": "Relatório gerado"}
+    return {"ok": False, "error": "Ação inválida"}
 
 controller = AppController(task_runner=TaskRunnerAdapter(MyRunner()))
 ```
 
 ---
 
-## 11. Boas Práticas
+## Boas Práticas
 
-1. **Centralize estilos** no `base.qss`.  
-2. **Evite** `setStyleSheet` direto em widgets.  
-3. **Separe** lógica de UI e lógica de negócio (via `task_runner`).  
-4. **Padronize** nomes de rotas (`kebab-case`).  
-5. **Utilize** `theme_service` para cores e reatividade visual.  
-6. **Organize** pastas e mantenha estrutura limpa para facilitar o autoload.  
-
----
-
-## 12. Roadmap e Extensões Futuras
-
-- Suporte a **subpáginas e histórico de navegação**.  
-- **Centro de notificações persistente**.  
-- **Logger de eventos** integrável.  
-- **Sistema de pesquisa e atalhos globais**.  
-- **Gerenciador de estado leve** com Qt Signals.  
-- **Empacotamento** com PyInstaller/Briefcase.  
+- Centralize estilos no `base.qss`; evite `setStyleSheet` direto.
+- Separe UI de lógica de negócio (via `task_runner`).
+- Padronize rotas (kebab‑case) e labels claros.
+- Use `theme_service` para cores/tokens e reatividade visual.
+- Mantenha a estrutura de pastas limpa para facilitar autoload.
 
 ---
 
-© 2025 – UI Exec Framework | Documentação Técnica
+## Roadmap
+
+- Subpáginas e histórico de navegação aprimorados.
+- Centro de notificações persistente/filtrável.
+- Logger de eventos integrável.
+- Pesquisa global e atalhos adicionais.
+- Gerenciador de estado leve (Qt Signals).
+- Empacotamento (PyInstaller/Briefcase).
+

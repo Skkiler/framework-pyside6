@@ -1,15 +1,17 @@
 # ui/widgets/topbar.py
 
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QSpacerItem, QSizePolicy
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QSpacerItem, QSizePolicy, QMenu, QToolButton
 from PySide6.QtCore import Qt, Signal
 from ui.widgets.buttons import Controls
 
 
 class TopBar(QWidget):
-    """TopBar com breadcrumb clicável (à esquerda, após o hambúrguer) e título opcional."""
+    """TopBar com breadcrumb clicável (à esquerda, após o hambúrguer) e título opcional + sino com badge."""
 
-    # Emite o path acumulado do item clicado (ex.: "home/ferramentas")
     breadcrumbClicked = Signal(str)
+    openNotificationsRequested = Signal()
+    clearNotificationsRequested = Signal()
+    setUnreadCountRequested = Signal(int)
 
     def __init__(self, onHamburgerClick=None, title: str | None = None, parent=None):
         super().__init__(parent)
@@ -39,8 +41,33 @@ class TopBar(QWidget):
         self.title_label.setObjectName("TopBarTitle")
         layout.addWidget(self.title_label)
 
-        # Espaçador (empurra qualquer extra para a direita)
+        # Espaçador (empurra extra para a direita)
         layout.addItem(QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum))
+
+        # ===== Botão de notificações (QToolButton pintável) =====
+        self.btn_more = QToolButton(self)
+        self.btn_more.setObjectName("TitleBarButton")
+        self.btn_more.setText("✉")
+        self.btn_more.setToolTip("Notificações")
+        self.btn_more.setAutoRaise(True)
+        self.btn_more.setCursor(Qt.PointingHandCursor)
+        self.btn_more.setFixedSize(32, 24)
+        f = self.btn_more.font()
+        f.setFamily("Segoe UI Symbol")
+        self.btn_more.setFont(f)
+        self.btn_more.setPopupMode(QToolButton.InstantPopup)
+        self.btn_more.clicked.connect(self.openNotificationsRequested.emit)
+
+        # Badge de não lidas
+        self._badge = QLabel("0", self)
+        self._badge.setObjectName("BellBadge")     # usa estilos do QSS (#BellBadge)
+        self._badge.setVisible(False)
+
+        layout.addWidget(self.btn_more, 0, Qt.AlignRight)
+        layout.addWidget(self._badge, 0, Qt.AlignRight)
+
+        # Permite que alguém externo ajuste o badge
+        self.setUnreadCountRequested.connect(self._onUnreadChanged)
 
         # Inicializa o título
         self.set_title(title)
@@ -66,12 +93,6 @@ class TopBar(QWidget):
         return self.title_label.text()
 
     def set_breadcrumb(self, parts: list[tuple[str, str]] | None):
-        """
-        Atualiza breadcrumb.
-        parts: lista de pares (label, path_acumulado)
-          Ex.: [("Início","home"), ("Ferramentas","home/ferramentas"), ("Detalhes","home/ferramentas/detalhes")]
-        Visual: texto plano; no hover, muda a cor (via QSS). O último item é só texto (estado "current").
-        """
         # Limpa o container atual
         while self._bc_layout.count():
             item = self._bc_layout.takeAt(0)
@@ -114,3 +135,12 @@ class TopBar(QWidget):
                 self._bc_layout.addWidget(sep)
 
         self._breadcrumb_container.setVisible(True)
+
+    # ===== internos =====
+    def _onUnreadChanged(self, n: int):
+        try:
+            n = max(0, int(n))
+        except Exception:
+            n = 0
+        self._badge.setText(str(n))
+        self._badge.setVisible(n > 0)
