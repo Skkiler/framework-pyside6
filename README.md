@@ -845,3 +845,34 @@ Dicas de estilo
 - QSS: declare variantes com `setProperty("variant", ...)` e tamanhos com `setProperty("size", ...)`.
 - Imports: agrupe padrão→terceiros→locais; mantenha ordem alfabética (use `isort`).
 - Formatação: 88 colunas (black), quebras legíveis, evite linhas muito longas.
+
+Sobre o arquivo pyproject.toml
+
+- O que é: um arquivo único de configuração (na raiz do projeto) que centraliza as regras de ferramentas como Black, Ruff, isort e mypy.
+- Onde fica: `pyproject.toml` na raiz deste repositório.
+- Por que usar: padroniza estilo e qualidade para todo o time, reduzindo ruído em PRs e tornando os comandos previsíveis.
+- Como funciona: cada ferramenta lê suas opções diretamente do `pyproject.toml`, então você não precisa passar flags nos comandos.
+
+Comandos do dia a dia (usam o pyproject.toml):
+
+```
+# Lint (apenas checar)
+ruff check .
+
+# Lint com correções automáticas
+ruff check . --fix
+
+# Formatar código (opiniado)
+black .
+
+# Organizar imports
+isort .
+
+# Checar tipos (opcional, gradual)
+mypy ui app
+```
+
+Sugestões de fluxo
+
+- Para iniciantes: rode `ruff check . --fix` e depois `black .`; se houver import bagunçado, rode `isort .`.
+- Para quem já domina: configure um pre-commit com `ruff`, `black` e `isort` ou adicione esses passos no seu CI.

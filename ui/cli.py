@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 import argparse
 from pathlib import Path
 import re
@@ -69,7 +69,7 @@ class {class_name}(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(10)
 
-        lay.addWidget(QLabel("Página: {label}"))
+        lay.addWidget(QLabel("PÃ¡gina: {label}"))
         lay.addStretch(1)
 
         scroll.setWidget(container)
@@ -104,10 +104,10 @@ class ExamplesPage(QWidget):
         scroll = QScrollArea(self); scroll.setWidgetResizable(True)
         wrap = QFrame(); lv = QVBoxLayout(wrap); lv.setContentsMargins(0,0,0,0); lv.setSpacing(10)
 
-        lv.addWidget(QLabel("Botões (Controls.Button)"))
+        lv.addWidget(QLabel("BotÃµes (Controls.Button)"))
         row = QHBoxLayout(); row.setSpacing(8)
-        b1 = Controls.Button("Primário", size_preset="md"); b1.setProperty("variant","primary"); row.addWidget(b1)
-        b2 = Controls.Button("Padrão", size_preset="md"); row.addWidget(b2)
+        b1 = Controls.Button("PrimÃ¡rio", size_preset="md"); b1.setProperty("variant","primary"); row.addWidget(b1)
+        b2 = Controls.Button("PadrÃ£o", size_preset="md"); row.addWidget(b2)
         b3 = Controls.Button("Chip", size_preset="sm"); b3.setProperty("variant","chip"); row.addWidget(b3)
         row.addStretch(1); lv.addLayout(row)
 
@@ -121,18 +121,19 @@ class ExamplesPage(QWidget):
         lv.addWidget(ab)
 
         lv.addWidget(QLabel("Toasts"))
-        lv.addWidget(Controls.Button("Toast simples", size_preset="sm", clicked=lambda: show_toast(self, "Ação ok")))
+        lv.addWidget(Controls.Button("Toast simples", size_preset="sm", clicked=lambda: show_toast(self, "AÃ§Ã£o ok")))
 
         def _toast_action():
+            show_action_toast(self, "ExportaÃ§Ã£o", "Arquivo pronto.", kind="ok",
             show_action_toast(self, "Exportação", "Arquivo pronto.", kind="ok",
-                              actions=[{"label":"Abrir pasta","command":"abrir_pasta","payload":{}}], persist=True)
-        lv.addWidget(Controls.Button("Toast com ação", size_preset="sm", clicked=_toast_action))
+                              actions=[{{"label":"Abrir pasta","command":"abrir_pasta","payload":{{}}}}], persist=True)
+        lv.addWidget(Controls.Button("Toast com aÃ§Ã£o", size_preset="sm", clicked=_toast_action))
 
         def _toast_progress():
             pt = ProgressToast.start(self, "Processando...", kind="info", cancellable=True)
             for i in range(1, 6):
                 from time import sleep; sleep(0.2); pt.update(i, 5)
-            pt.finish(True, "Concluído")
+            pt.finish(True, "ConcluÃ­do")
         lv.addWidget(Controls.Button("Toast progresso", size_preset="sm", clicked=_toast_progress))
 
         lv.addStretch(1)
@@ -229,7 +230,7 @@ def cmd_new_page(args):
     filename = f"{route.replace('/', '_')}_page.py"
     target = pdir / filename
     if target.exists() and not args.force:
-        print(f"[ERRO] Arquivo já existe: {target}\nUse --force para sobrescrever.")
+        print(f"[ERRO] Arquivo jÃ¡ existe: {target}\nUse --force para sobrescrever.")
         sys.exit(2)
 
     content = PAGE_TEMPLATE.format(
@@ -249,7 +250,7 @@ def cmd_new_page(args):
     })
     _manifest_save(man, items)
 
-    print(f"[OK] Página criada: {target}")
+    print(f"[OK] PÃ¡gina criada: {target}")
     print(f" - Rota: {route}")
     print(f" - Classe: {class_name}")
     print(f" - Manifesto atualizado: {man}")
@@ -258,7 +259,7 @@ def cmd_new_page(args):
 def cmd_new_subpage(args):
     parent = (args.parent or "").strip("/")
     if not parent:
-        print("[ERRO] Informe --parent com a rota da página pai (ex.: home)")
+        print("[ERRO] Informe --parent com a rota da pÃ¡gina pai (ex.: home)")
         sys.exit(2)
     name = args.name
     route_tail = (args.route or to_snake(name)).replace("\\", "/").strip("/")
@@ -271,7 +272,7 @@ def cmd_scaffold_examples(args):
     pdir = pages_dir(); pdir.mkdir(parents=True, exist_ok=True)
     target = pdir / "examples_widgets_page.py"
     if target.exists() and not args.force:
-        print(f"[ERRO] Arquivo já existe: {target} (--force para sobrescrever)")
+        print(f"[ERRO] Arquivo jÃ¡ existe: {target} (--force para sobrescrever)")
         sys.exit(2)
     target.write_text(EXAMPLES_TEMPLATE.format(now=datetime.now().isoformat(timespec='seconds')), encoding="utf-8")
 
@@ -285,7 +286,7 @@ def cmd_scaffold_examples(args):
         "factory": "app.pages.examples_widgets_page:build",
     })
     _manifest_save(man, items)
-    print(f"[OK] Página de exemplos criada e manifesto atualizado: {target}")
+    print(f"[OK] PÃ¡gina de exemplos criada e manifesto atualizado: {target}")
 
 
 def cmd_manifest_update(args):
@@ -316,7 +317,7 @@ def _safe_remove(p: Path):
 
 def cmd_clean_pages(args):
     pdir = pages_dir()
-    # Remover páginas pré-programadas
+    # Remover pÃ¡ginas prÃ©-programadas
     targets = [
         pdir / "home_page.py",
         pdir / "notificacoes.py",   # opcional
@@ -329,7 +330,7 @@ def cmd_clean_pages(args):
         _safe_remove(t)
 
     # Criar home vazia
-    ns = argparse.Namespace(name="Home", route="home", label="Início", order=0, sidebar=True, force=True, parent=None)
+    ns = argparse.Namespace(name="Home", route="home", label="InÃ­cio", order=0, sidebar=True, force=True, parent=None)
     cmd_new_page(ns)
 
     # Limpar manifesto para manter home (ou reconstruir)
@@ -342,14 +343,13 @@ def cmd_clean_pages(args):
             return r in {"home"}
         items = [it for it in items if keep(it)] or [{
             "route": "home",
-            "label": "Início",
+            "label": "InÃ­cio",
             "sidebar": True,
             "order": 0,
             "factory": "app.pages.home_page:build",
         }]
         _manifest_save(man, items)
-        print(f"[OK] Manifesto limpo: {man}
-")
+        print(f"[OK] Manifesto limpo: {man}")
 
 
 def build_parser():
@@ -357,30 +357,30 @@ def build_parser():
     sub = p.add_subparsers(dest="command", required=True)
 
     # new
-    sp = sub.add_parser("new", help="Gerar artefatos (páginas, etc.)")
+    sp = sub.add_parser("new", help="Gerar artefatos (pÃ¡ginas, etc.)")
     ssub = sp.add_subparsers(dest="artifact", required=True)
 
-    sp_page = ssub.add_parser("page", help="Criar nova página em app/pages")
-    sp_page.add_argument("name", help="Nome lógico da página (ex.: Relatorios, ConfigAvancada)")
+    sp_page = ssub.add_parser("page", help="Criar nova pÃ¡gina em app/pages")
+    sp_page.add_argument("name", help="Nome lÃ³gico da pÃ¡gina (ex.: Relatorios, ConfigAvancada)")
     sp_page.add_argument("--route", help="Rota (default: nome em snake-case)")
-    sp_page.add_argument("--label", help="Rótulo da sidebar (default: name)")
+    sp_page.add_argument("--label", help="RÃ³tulo da sidebar (default: name)")
     sp_page.add_argument("--order", default="999", help="Ordem na sidebar (default: 999)")
     sp_page.add_argument("--sidebar", action="store_true", help="Exibir na sidebar")
     sp_page.add_argument("--force", action="store_true", help="Sobrescrever arquivo existente")
     sp_page.set_defaults(func=cmd_new_page)
 
-    sp_sub = ssub.add_parser("subpage", help="Criar subpágina vinculada a uma rota pai")
-    sp_sub.add_argument("name", help="Nome lógico da subpágina")
+    sp_sub = ssub.add_parser("subpage", help="Criar subpÃ¡gina vinculada a uma rota pai")
+    sp_sub.add_argument("name", help="Nome lÃ³gico da subpÃ¡gina")
     sp_sub.add_argument("--parent", required=True, help="Rota pai (ex.: home)")
     sp_sub.add_argument("--route", help="Parte final da rota (default: nome em snake-case)")
-    sp_sub.add_argument("--label", help="Rótulo da sidebar")
+    sp_sub.add_argument("--label", help="RÃ³tulo da sidebar")
     sp_sub.add_argument("--order", default="999", help="Ordem na sidebar")
     sp_sub.add_argument("--sidebar", action="store_true", help="Exibir na sidebar")
     sp_sub.add_argument("--force", action="store_true", help="Sobrescrever arquivo existente")
     sp_sub.set_defaults(func=cmd_new_subpage)
 
     # scaffold examples
-    sp_ex = sub.add_parser("examples", help="Gerar página de exemplos de widgets/botões")
+    sp_ex = sub.add_parser("examples", help="Gerar pÃ¡gina de exemplos de widgets/botÃµes")
     sp_ex.add_argument("--force", action="store_true")
     sp_ex.set_defaults(func=cmd_scaffold_examples)
 
@@ -389,7 +389,7 @@ def build_parser():
     sp_mu.set_defaults(func=cmd_manifest_update)
 
     # clean pages
-    sp_clean = sub.add_parser("clean-pages", help="Remover páginas pré-programadas e criar Home vazia")
+    sp_clean = sub.add_parser("clean-pages", help="Remover pÃ¡ginas prÃ©-programadas e criar Home vazia")
     sp_clean.add_argument("--rebuild-manifest", action="store_true", help="Recriar manifesto a partir da descoberta")
     sp_clean.set_defaults(func=cmd_clean_pages)
 

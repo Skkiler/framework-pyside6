@@ -305,6 +305,28 @@ Guidelines
 - Expose `PAGE` + `build(...)` and implement `on_route(params)` in pages.
 - Use QSS properties for variants/sizes: `setProperty("variant", …)`, `setProperty("size", …)`.
 
+About pyproject.toml
+
+- What it is: a single config file at the project root that centralizes settings for Black, Ruff, isort and mypy.
+- Where it lives: `pyproject.toml` in the repo root.
+- Why it matters: everyone follows the same rules; fewer style-only diffs; simpler commands.
+- How it works: tools read options from `pyproject.toml` so you can run commands without long flags.
+
+Everyday commands (honor pyproject.toml):
+
+```
+ruff check .          # lint
+ruff check . --fix    # lint + autofix
+black .               # format
+isort .               # sort imports
+mypy ui app           # type-check (optional)
+```
+
+Suggested flow
+
+- Getting started: run `ruff check . --fix` then `black .`; if imports shuffle, run `isort .`.
+- Power users: wire a pre-commit with ruff/black/isort or add these to your CI.
+
 ---
 
 ## Page Blueprint
@@ -351,4 +373,3 @@ def build(task_runner=None, theme_service=None) -> QWidget:
 - Global search and shortcuts
 - Lightweight state manager (Qt Signals)
 - Packaging (PyInstaller/Briefcase)
-
