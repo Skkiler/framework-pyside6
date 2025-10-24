@@ -1,0 +1,10 @@
+# Ensure binary assets are treated as binary and never CRLF-normalized
+*.ico binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+
+# Assets under app/assets should not be normalized as text
+app/assets/** -text
+

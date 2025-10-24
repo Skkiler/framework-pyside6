@@ -1,6 +1,10 @@
 ﻿from __future__ import annotations
 import argparse
 from pathlib import Path
+import os
+import shutil
+import subprocess
+import tempfile
 import re
 import sys
 import json
@@ -22,8 +26,19 @@ def to_camel(name: str) -> str:
 
 # === paths ===
 def repo_root() -> Path:
-    # ui/ is this file's parent; repo is one level up
-    return Path(__file__).resolve().parents[1]
+    """Resolve o diretório raiz do projeto para operações do CLI.
+
+    Quando instalado como pacote (site-packages), basear em __file__ quebra,
+    pois o pai de ui/ não é o repositório do usuário. Preferimos o CWD e,
+    se possível, subimos procurando um diretório que contenha "app/".
+    """
+    cwd = Path.cwd().resolve()
+    # procura por uma pasta "app" começando do CWD e subindo
+    for p in [cwd, *cwd.parents]:
+        if (p / "app").exists():
+            return p
+    # fallback: CWD
+    return cwd
 
 
 def app_dir() -> Path:
@@ -40,6 +55,9 @@ def assets_dir() -> Path:
 
 def manifest_path() -> Path:
     return assets_dir() / "pages_manifest.json"
+
+# Repositório padrão do framework (clone para copiar todos os arquivos)
+DEFAULT_REPO_URL = "https://github.com/Skkiler/framework-pyside6.git"
 
 
 # === templates ===
@@ -400,6 +418,236 @@ def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
     args.func(args)
+
+"""
+NOVO: Comando `init` para criar um novo projeto.
+Cria a estrutura básica (app/, assets/, tema e qss) ou copia de uma fonte.
+"""
+
+# --- Templates embutidos (fallback quando não há --from-path) ---
+SETTINGS_TEMPLATE = """# app/settings.py (gerado por ui-cli init)
+from pathlib import Path
+import shutil
+
+APP_TITLE = "Meu App"
+DEFAULT_THEME = "Dracula"
+FIRST_PAGE = "home"
+PAGES_MANIFEST_FILENAME = "pages_manifest.json"
+
+BASE_DIR   = Path(__file__).resolve().parent
+APP_DIR    = BASE_DIR.parent
+ASSETS_DIR = (APP_DIR / "assets").resolve()
+THEMES_DIR = (ASSETS_DIR / "themes").resolve()
+CACHE_DIR  = (ASSETS_DIR / "cache").resolve()
+USER_QSS_DIR = (ASSETS_DIR / "qss").resolve()
+
+for _p in (THEMES_DIR, CACHE_DIR, USER_QSS_DIR):
+    _p.mkdir(parents=True, exist_ok=True)
+
+_asset_themes_dir = THEMES_DIR  # neste template, já é o destino
+try:
+    has_any_theme = any(THEMES_DIR.glob("*.json"))
+    if (not has_any_theme) and _asset_themes_dir.exists():
+        for src in _asset_themes_dir.glob("*.json"):
+            dst = THEMES_DIR / src.name
+            try:
+                if str(src.resolve()) != str(dst.resolve()):
+                    shutil.copy2(src, dst)
+            except Exception:
+                pass
+except Exception:
+    pass
+"""
+
+APP_TEMPLATE = """# app/app.py (gerado por ui-cli init)
+from __future__ import annotations
+import sys
+from PySide6.QtWidgets import QApplication
+import app.settings as cfg
+from ui.core.app_controller import AppController
+from ui.core.settings import Settings
+
+def main() -> None:
+    app = QApplication(sys.argv)
+    settings = Settings(cache_dir=cfg.CACHE_DIR, filename="_ui_exec_settings.json")
+    controller = AppController(
+        task_runner=None,
+        assets_dir=str(cfg.ASSETS_DIR),
+        base_qss_path=str((cfg.USER_QSS_DIR / "base.qss")),
+        themes_dir=str(cfg.THEMES_DIR),
+        default_theme=cfg.DEFAULT_THEME,
+        first_page=cfg.FIRST_PAGE,
+        manifest_filename=cfg.PAGES_MANIFEST_FILENAME,
+        settings=settings,
+        app_title=cfg.APP_TITLE,
+    )
+    controller.show()
+    sys.exit(app.exec())
+
+if __name__ == "__main__":
+    main()
+"""
+
+BASE_QSS_TEMPLATE = """:root {\n}/* base.qss gerado por ui-cli init */\n"""
+
+THEME_DRACULA = """{
+  "name": "Dracula",
+  "palette": {
+    "bg": "#282a36",
+    "fg": "#f8f8f2",
+    "accent": "#bd93f9",
+    "ok": "#50fa7b",
+    "warn": "#f1fa8c",
+    "error": "#ff5555"
+  }
+}
+"""
+
+
+def _copy_tree(src: Path, dst: Path, *, force: bool = False) -> None:
+    """Copia recursivamente src -> dst, ignorando artefatos comuns."""
+    exclude_names = {".git", "venv", ".venv", "__pycache__", "dist", "build", ".mypy_cache", ".pytest_cache", ".idea", ".vscode", ".DS_Store"}
+    if dst.exists():
+        if any(dst.iterdir()) and not force:
+            print(f"[ERRO] Destino não vazio: {dst}. Use --force.")
+            sys.exit(2)
+    else:
+        dst.mkdir(parents=True, exist_ok=True)
+
+    for root, dirs, files in os.walk(src):
+        rpath = Path(root)
+        # filtra dirs no lugar
+        dirs[:] = [d for d in dirs if d not in exclude_names]
+        rel_root = rpath.relative_to(src)
+        out_dir = dst / rel_root
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for fn in files:
+            if fn in exclude_names:
+                continue
+            src_file = rpath / fn
+            dst_file = out_dir / fn
+            # não copia arquivos dentro de .git, venv, etc já filtrados
+            shutil.copy2(src_file, dst_file)
+
+
+def cmd_init_full(args):
+    """Clone the full upstream repository into destination (1:1 except VCS/venv/artifacts)."""
+    dest = Path(getattr(args, "dest", ".") or ".").resolve()
+    url = getattr(args, "repo", None) or DEFAULT_REPO_URL
+    with tempfile.TemporaryDirectory() as td:
+        repo_dir = Path(td) / "repo"
+        try:
+            subprocess.run(["git", "clone", "--depth", "1", url, str(repo_dir)], check=True)
+        except FileNotFoundError:
+            print("[ERRO] Git nao encontrado no PATH. Instale o Git para usar 'ui-cli init'.")
+            sys.exit(2)
+        except subprocess.CalledProcessError as e:
+            print(f"[ERRO] Falha ao clonar {url}: {e}")
+            sys.exit(2)
+        _copy_tree(repo_dir, dest, force=bool(getattr(args, "force", False)))
+    print(f"[OK] Projeto clonado de {url} para: {dest}")
+
+def cmd_init(args):
+    """Inicializa um novo projeto.
+    - Se --from-path for dado, copia tudo de lá (como um clone sem .git/venv/dist/build).
+    - Caso contrário, gera um esqueleto mínimo funcional.
+    """
+    dest = Path(args.dest or ".").resolve()
+    # Clone via git do repositório padrão
+    if args.full:
+        url = DEFAULT_REPO_URL
+        with tempfile.TemporaryDirectory() as td:
+            repo_dir = Path(td) / "repo"
+            try:
+                subprocess.run(["git", "clone", "--depth", "1", url, str(repo_dir)], check=True)
+            except FileNotFoundError:
+                print("[ERRO] Git não encontrado no PATH. Instale o Git para usar --full.")
+                sys.exit(2)
+            except subprocess.CalledProcessError as e:
+                print(f"[ERRO] Falha ao clonar {url}: {e}")
+                sys.exit(2)
+            _copy_tree(repo_dir, dest, force=bool(args.force))
+        print(f"[OK] Projeto clonado de {url} para: {dest}")
+        return
+
+    # Esqueleto mínimo
+    (dest / "app" / "assets" / "qss").mkdir(parents=True, exist_ok=True)
+    (dest / "app" / "assets" / "themes").mkdir(parents=True, exist_ok=True)
+    (dest / "app" / "assets" / "cache").mkdir(parents=True, exist_ok=True)
+    (dest / "app" / "pages").mkdir(parents=True, exist_ok=True)
+
+    (dest / "app" / "settings.py").write_text(SETTINGS_TEMPLATE, encoding="utf-8")
+    (dest / "app" / "app.py").write_text(APP_TEMPLATE, encoding="utf-8")
+    (dest / "app" / "assets" / "qss" / "base.qss").write_text(BASE_QSS_TEMPLATE, encoding="utf-8")
+    (dest / "app" / "assets" / "themes" / "Dracula.json").write_text(THEME_DRACULA, encoding="utf-8")
+
+    # Criar página Home e manifesto
+    cwd_before = Path.cwd()
+    try:
+        os.chdir(dest)
+        ns = argparse.Namespace(name="Home", route="home", label="Início", order=0, sidebar=True, force=True, parent=None)
+        cmd_new_page(ns)
+        cmd_manifest_update(argparse.Namespace())
+    finally:
+        os.chdir(cwd_before)
+
+    # Arquivos auxiliares
+    (dest / "README.md").write_text("# Meu App\n\nGerado por ui-cli init.\n\nRode:\n\n```\npython -m app.app\n```\n", encoding="utf-8")
+    (dest / ".gitignore").write_text(".venv\nvenv\n__pycache__\n*.pyc\ndist\nbuild\n", encoding="utf-8")
+
+    print(f"[OK] Projeto inicializado em: {dest}")
+
+
+def build_parser():
+    p = argparse.ArgumentParser(prog="ui-cli", description="Ferramentas de DX do framework UI.")
+    sub = p.add_subparsers(dest="command", required=True)
+
+    # new
+    sp = sub.add_parser("new", help="Gerar artefatos (páginas, etc.)")
+    ssub = sp.add_subparsers(dest="artifact", required=True)
+
+    sp_page = ssub.add_parser("page", help="Criar nova página em app/pages")
+    sp_page.add_argument("name", help="Nome lógico da página (ex.: Relatorios, ConfigAvancada)")
+    sp_page.add_argument("--route", help="Rota (default: nome em snake-case)")
+    sp_page.add_argument("--label", help="Rótulo da sidebar (default: name)")
+    sp_page.add_argument("--order", default="999", help="Ordem na sidebar (default: 999)")
+    sp_page.add_argument("--sidebar", action="store_true", help="Exibir na sidebar")
+    sp_page.add_argument("--force", action="store_true", help="Sobrescrever arquivo existente")
+    sp_page.set_defaults(func=cmd_new_page)
+
+    sp_sub = ssub.add_parser("subpage", help="Criar subpágina vinculada a uma rota pai")
+    sp_sub.add_argument("name", help="Nome lógico da subpágina")
+    sp_sub.add_argument("--parent", required=True, help="Rota pai (ex.: home)")
+    sp_sub.add_argument("--route", help="Parte final da rota (default: nome em snake-case)")
+    sp_sub.add_argument("--label", help="Rótulo da sidebar")
+    sp_sub.add_argument("--order", default="999", help="Ordem na sidebar")
+    sp_sub.add_argument("--sidebar", action="store_true", help="Exibir na sidebar")
+    sp_sub.add_argument("--force", action="store_true", help="Sobrescrever arquivo existente")
+    sp_sub.set_defaults(func=cmd_new_subpage)
+
+    # scaffold examples
+    sp_ex = sub.add_parser("examples", help="Gerar página de exemplos de widgets/botões")
+    sp_ex.add_argument("--force", action="store_true")
+    sp_ex.set_defaults(func=cmd_scaffold_examples)
+
+    # manifest update
+    sp_mu = sub.add_parser("manifest-update", help="Reescrever app/assets/pages_manifest.json via auto-descoberta")
+    sp_mu.set_defaults(func=cmd_manifest_update)
+
+    # clean pages
+    sp_clean = sub.add_parser("clean-pages", help="Remover páginas pré-programadas e criar Home vazia")
+    sp_clean.add_argument("--rebuild-manifest", action="store_true", help="Recriar manifesto a partir da descoberta")
+    sp_clean.set_defaults(func=cmd_clean_pages)
+
+    # init
+    sp_init = sub.add_parser("init", help="Inicializar novo projeto (git do framework ou esqueleto)")
+    sp_init.add_argument("--dest", default=".", help="Diretório destino (default: .)")
+    sp_init.add_argument("--full", action="store_true", help="Clonar automaticamente o repositório público padrão do framework")
+    sp_init.add_argument("--force", action="store_true", help="Sobrescrever conteúdo existente no destino")
+    sp_init.set_defaults(func=cmd_init_full)
+    sp_init.add_argument("--repo", default=DEFAULT_REPO_URL, help="URL do repositorio Git a clonar")
+
+    return p
 
 
 if __name__ == "__main__":

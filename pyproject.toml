@@ -4,7 +4,7 @@
 line-length = 100
 target-version = ["py310"]
 include = "\\.pyi?$"
-exclude = """
+exclude = '''
 /(
     \.git
   | \.venv
@@ -14,7 +14,7 @@ exclude = """
   | app/assets
   | ui/resources\.qrc
 )
-/"""
+/'''
 
 [tool.isort]
 profile = "black"
@@ -52,3 +52,46 @@ ignore_missing_imports = true
 strict_optional = true
 plugins = []
 
+# --- Packaging (PEP 621) ---
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ui-fram-skk"
+version = "0.1.1"
+description = "Framework de UI desktop (PySide6) com janela frameless, roteamento e temas"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "license" }
+authors = [
+  { name = "João Vitor de Souza Siqueira", email = "skkiler13ka@gmail.com" }
+]
+keywords = ["pyside6", "qt", "ui", "desktop", "framework"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Environment :: Win32 (MS Windows)",
+  "Topic :: Software Development :: User Interfaces",
+]
+dependencies = [
+  "PySide6"
+]
+
+[project.urls]
+Homepage = "https://github.com/Skkiler/framework-pyside6"
+Repository = "https://github.com/Skkiler/framework-pyside6"
+
+[project.scripts]
+ui-cli = "ui.cli:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ui*"]
+exclude = ["app*", "venv*", "build*", "dist*"]
