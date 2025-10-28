@@ -18,7 +18,6 @@ class QuickOpenDialog(FramelessDialog):
         super().__init__(parent)
         self.setObjectName("QuickOpenDialog")
         self.setProperty("role", "panel")
-        self.setMinimumSize(520, 360)
         self.set_edges_enabled(False)      # diálogo não redimensionável por borda
         self.set_center_mode("parent")     # centraliza sobre a janela do app
 

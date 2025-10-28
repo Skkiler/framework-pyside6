@@ -10,10 +10,11 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QWidget, QLabel, QHBoxLayout, QVBoxLayout,
-    QPushButton, QProgressBar, QSpacerItem, QSizePolicy
+    QPushButton, QProgressBar, QSpacerItem, QSizePolicy, QFrame
 )
 
-from ui.core.frameless_window import FramelessWindow
+from ui.core.frameless_window import FramelessToastDialog
+from ui.widgets.titlebar import TitleBar
 
 
 # ==================== NotificationBus (integração com Centro de Notificações) ====================
@@ -118,7 +119,7 @@ class _ToastManager:
 
 # ==================== Shell reaproveitando o FramelessWindow ====================
 
-class ToastShell(FramelessWindow):
+class ToastShell(FramelessToastDialog):
     """
     Mini-janela de notificação flutuante (bottom-right), usando FramelessWindow.
     - Sem focar a aplicação
@@ -134,6 +135,11 @@ class ToastShell(FramelessWindow):
 
     def __init__(self, parent_for_screen: QWidget | None, *, kind: str = "info"):
         super().__init__(None)
+        # Marca a janela como 'toast' para QSS com escopo
+        try:
+            self.setProperty("toast", True)
+        except Exception:
+            pass
         self._parent_ref = parent_for_screen
         self._mgr = _ToastManager()
         self._screen_id: int | None = None
@@ -162,59 +168,62 @@ class ToastShell(FramelessWindow):
         self.set_edges_enabled(False)
         self.set_min_resize_size(220, 90)
 
-        # ===== Titlebar mínima (apenas fechar) =====
-        topbar = QWidget(self)
-        topbar.setObjectName("TopBar")
-        th = QHBoxLayout(topbar)
-        th.setContentsMargins(6, 6, 6, 6)
-        th.setSpacing(6)
-        th.addStretch(1)
-        btn_close = QPushButton("✕", topbar)
-        btn_close.setObjectName("TitleBarButton")
-        btn_close.setFocusPolicy(Qt.NoFocus)
-        btn_close.setCursor(Qt.PointingHandCursor)
-        # >>> IMPORTANTE: fecha = OCULTAR (não destrói widgets)
-        btn_close.clicked.connect(self.dismiss)
-        th.addWidget(btn_close, 0)
-        self.connect_titlebar(topbar)
-
-        # ===== Conteúdo central =====
-        content = QWidget(self)
-        content.setObjectName("FramelessContent")
-
-        cv = QVBoxLayout(content)
-        cv.setContentsMargins(14, 8, 14, 12)   # topo menor → texto centrado
-        cv.setSpacing(10)
-        cv.setAlignment(Qt.AlignCenter)
-
-        # Frame único para QSS (sempre o mesmo alvo)
+        # ===== Estrutura no padrão dos FramelessDialog (não modal) =====
         frame = QWidget(self)
         frame.setObjectName("ToastFrame")
         frame.setAttribute(Qt.WA_StyledBackground, True)
         frame.setProperty("toast", True)
         frame.setProperty("kind", kind)
 
+        root = QWidget(frame)
+        v = QVBoxLayout(root)
+        v.setContentsMargins(12, 12, 12, 12)
+        v.setSpacing(8)
+
+        title = ""
+        tb = TitleBar(title, parent=root)
+        self.connect_titlebar(tb)
+        # Fechar pela titlebar oculta o toast (sem destruir)
+        try:
+            if hasattr(tb, "btn_close"):
+                tb.btn_close.clicked.connect(self.dismiss)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        v.addWidget(tb)
+
+        # Painel interno com borda
+        panel = QFrame(root)
+        panel.setObjectName("OuterPanel")
+        pv = QVBoxLayout(panel)
+        pv.setContentsMargins(10, 10, 10, 10)
+        pv.setSpacing(8)
+        v.addWidget(panel)
+
+        # Conteúdo real do toast
+        content = QWidget(panel)
+        content.setObjectName("FramelessContent")
+        cv = QVBoxLayout(content)
+        cv.setContentsMargins(0, 0, 0, 0)
+        cv.setSpacing(8)
+        cv.setAlignment(Qt.AlignCenter)
+        pv.addWidget(content)
+
         lay = QVBoxLayout(frame)
-        lay.setContentsMargins(1, 1, 1, 1)
+        lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        lay.addWidget(topbar)
-        lay.addWidget(content)
+        lay.addWidget(root)
 
         super().setCentralWidget(frame)
 
-        self._topbar = topbar
+        self._topbar = tb
         self._content = content
         self._content_lay = cv
 
-        # Animador de posição (slide-in). Fadear via windowOpacity do próprio FramelessWindow.
+        # Animador de posição (slide-in). Fadear via windowOpacity.
         self._anim_pos = QPropertyAnimation(self, b"pos", self)
         self._anim_pos.setEasingCurve(QEasingCurve.OutCubic)
 
-        # Marca o tipo no frame para QSS condicional
-        frame = self._content.parentWidget().parentWidget()
-        if frame:
-            frame.setProperty("kind", kind)
-            frame.setProperty("toast", True)
+        # Marca o tipo no frame para QSS condicional (já feito acima)
 
     # ---------- integração com manager ----------   # (visual/empilhamento)
     def show_toast(self):

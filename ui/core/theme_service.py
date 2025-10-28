@@ -6,61 +6,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Callable
 
-from PySide6.QtCore import QObject, Signal, QTimeLine, QFileSystemWatcher
+from PySide6.QtCore import QObject, Signal, QTimeLine, QFileSystemWatcher, QTimer
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication, QWidget
 
 from ui.services.qss_renderer import load_base_qss, render_qss_from_base
 from .settings import Settings
 from .interface_ports import IThemeRepository
-
-
-# =============================================================================
-# Helpers puros (sem Qt state) — fáceis de testar
-# =============================================================================
-
-def _is_hex(value: Any) -> bool:
-    return isinstance(value, str) and value.strip().startswith("#")
-
-
-def _lerp_color(a: QColor, b: QColor, t: float) -> QColor:
-    """Interpolação linear RGBA (0..1)."""
-    return QColor(
-        int(a.red()   + (b.red()   - a.red())   * t),
-        int(a.green() + (b.green() - a.green()) * t),
-        int(a.blue()  + (b.blue()  - a.blue())  * t),
-        int(a.alpha() + (b.alpha() - a.alpha()) * t),
-    )
-
-
-def _rgba_from_hex(hex_str: str, alpha: float) -> str:
-    c = QColor(hex_str)
-    a = max(0.0, min(1.0, float(alpha)))
-    return f"rgba({c.red()},{c.green()},{c.blue()},{a:.2f})"
-
-
-def _coerce_vars(theme_obj: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Aceita estrutura antiga ou nova:
-      - nova: {"vars": {...}, "palette": {...}}
-      - antiga: {...} (vars na raiz)
-    """
-    if not isinstance(theme_obj, dict):
-        return {}
-    return theme_obj.get("vars") if isinstance(theme_obj.get("vars"), dict) else theme_obj
-
-
-def _make_tokens(base_vars: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Gera tokens finais (inclui derivados sem poluir o original).
-    """
-    tokens = dict(base_vars)  # copy
-    surface_hex = tokens.get("surface")
-    if isinstance(surface_hex, str) and surface_hex.startswith("#"):
-        tokens["loading_overlay_bg"] = _rgba_from_hex(surface_hex, 0.05)
-    else:
-        tokens["loading_overlay_bg"] = "rgba(255,255,255,0.12)"
-    return tokens
+from ui.core.utils.helpers import is_hex, lerp_color, rgba_from_hex, coerce_vars, make_tokens
 
 
 # =============================================================================
@@ -102,6 +55,9 @@ class ThemeService(QObject):
         self._timeline: Optional[QTimeLine] = None
         self._current_name: Optional[str] = None
         self._animate_ms_default = max(80, int(animate_ms_default))
+        self._qss_cache: dict[str, str] = {}
+        self._last_qss_hash: Optional[int] = None
+        self._themes_changed_debounce: Optional[QTimeLine] = None
 
         # QSS base (conteúdo do arquivo) + caminho (para watcher opcional)
         self._base_qss_path = Path(base_qss_path) if base_qss_path else None
@@ -318,6 +274,10 @@ class ThemeService(QObject):
         """
         Aplica um tema. Se `animate=True` e há tema anterior, interpola cores hex.
         """
+        # Short‑circuit when applying the same theme again
+        if theme_name and self._current_name and theme_name == self._current_name:
+            return
+
         new_theme = self._safe_load_theme(theme_name)
         if new_theme is None:
             return
@@ -335,7 +295,7 @@ class ThemeService(QObject):
             if animate and old_theme:
                 self._animate_apply(old_theme, new_theme, duration_ms or self._animate_ms_default)
             else:
-                self._apply_now(new_theme)
+                self._apply_now(new_theme, cache_key=theme_name)
 
             self._current_name = theme_name
             if persist:
@@ -360,8 +320,8 @@ class ThemeService(QObject):
 
     def _broadcast_tokens(self, vars_or_theme: Dict[str, Any]) -> None:
         """Emite tokens já derivados, para quem precisar 'repintar' recursos."""
-        vars_map = _coerce_vars(vars_or_theme)
-        tokens = _make_tokens(vars_map)
+        vars_map = coerce_vars(vars_or_theme)
+        tokens = make_tokens(vars_map)
         self.themeTokensChanged.emit(tokens)
 
     def _apply_palette_min(self, theme: Dict[str, Any]) -> None:
@@ -375,45 +335,86 @@ class ThemeService(QObject):
 
         pal = QPalette(app.palette())
         for role_name, hex_color in palette_map.items():
-            if hasattr(QPalette, role_name) and _is_hex(hex_color):
+            if hasattr(QPalette, role_name) and is_hex(hex_color):
                 pal.setColor(getattr(QPalette, role_name), QColor(hex_color))
         app.setPalette(pal)
 
-    def _apply_qss(self, theme: Dict[str, Any], *, dump: bool = False) -> None:
+    def apply_theme_interpolated(self, start_tokens: dict, end_tokens: dict, steps: int = 28):
+        """
+        Interpola os tokens do tema em pequenos passos e aplica o QSS ao final.
+        """
+        self._interpolation_step = 0
+        self._interpolation_steps = steps
+        self._start_tokens = start_tokens
+        self._end_tokens = end_tokens
+        self._interpolated_tokens = dict(start_tokens)
+        self._timer = QTimer(self)
+        interval = max(8, int(self._animate_ms_default / steps))
+        self._timer.timeout.connect(self._interpolation_tick)
+        self._timer.start(interval)
+
+    def _interpolation_tick(self):
+        t = self._interpolation_step / self._interpolation_steps
+        for k in self._start_tokens:
+            v0 = self._start_tokens[k]
+            v1 = self._end_tokens.get(k, v0)
+            if is_hex(v0) and is_hex(v1):
+                c0 = QColor(v0)
+                c1 = QColor(v1)
+                c = lerp_color(c0, c1, t)
+                self._interpolated_tokens[k] = c.name(QColor.HexArgb)
+            else:
+                self._interpolated_tokens[k] = v1 if t > 0.5 else v0
+        self._interpolation_step += 1
+        if self._interpolation_step > self._interpolation_steps:
+            self._timer.stop()
+            self._apply_qss(self._interpolated_tokens)
+
+    def _apply_qss(self, tokens: dict):
+        qss = render_qss_from_base(self._base_qss, tokens)
+        self._root.setStyleSheet(qss)
+
+    def _apply_qss(self, theme: Dict[str, Any], *, dump: bool = False, cache_key: Optional[str] = None) -> None:
         """Aplica QSS completo. Opcionalmente grava dump em disco (custa caro)."""
-        app = QApplication.instance()
-        if not app:
-            return
+        vars_map = coerce_vars(theme)
+        tokens = make_tokens(vars_map)
 
-        vars_map = _coerce_vars(theme)
-        tokens = _make_tokens(vars_map)
-
-        qss = render_qss_from_base(
-            self._base_qss,
-            tokens,
-            debug_dump_path=str(self._qss_dump.last_applied) if dump else None,
-        )
-
-        try:
-            app.setStyleSheet(qss)
-        except Exception:
-            safe = "\n".join(
-                line for line in qss.splitlines()
-                if ("{" in line and "}" in line) or ":" in line
+        # Cache QSS by key (theme name) to avoid full render on repeated applies
+        qss: Optional[str] = None
+        if cache_key:
+            qss = self._qss_cache.get(cache_key)
+        if not qss:
+            qss = render_qss_from_base(
+                self._base_qss,
+                tokens,
+                debug_dump_path=str(self._qss_dump.last_applied) if dump else None,
             )
-            try:
-                app.setStyleSheet(safe)
-            except Exception:
-                pass
-        finally:
-            # sempre notifica tokens efetivos após aplicar
-            self.themeTokensChanged.emit(tokens)
+            if cache_key:
+                self._qss_cache[cache_key] = qss
+
+        # Apply on the root window; stylesheet propagates to children
+        try:
+            if self._root:
+                self._root.setStyleSheet(qss)
+            # Also apply at application level so floating top-levels (e.g., Toast) inherit
+            app = QApplication.instance()
+            if app is not None:
+                try:
+                    app.setStyleSheet(qss)
+                except Exception:
+                    # fallback defensivo
+                    pass
+        except Exception:
+            pass
+
+        # notify tokens for icon re-renderers
+        self.themeTokensChanged.emit(tokens)
 
     def _apply_qss_light(self, vars_only: Dict[str, Any]) -> None:
         app = QApplication.instance()
         if not app:
             return
-        tokens = _make_tokens(vars_only)
+        tokens = make_tokens(vars_only)
         qss = render_qss_from_base(self._base_qss, tokens)
         try:
             # >>> antes: app.setStyleSheet(qss)
@@ -424,17 +425,20 @@ class ThemeService(QObject):
             # durante animação: broadcast dos tokens mixados (pra re-rasterizar ícones, etc.)
             self.themeTokensChanged.emit(tokens)
 
-    def _apply_now(self, theme: Dict[str, Any], *, dump: bool = False) -> None:
+
+    def _apply_now(self, theme: Dict[str, Any], *, dump: bool = False, cache_key: Optional[str] = None) -> None:
         try:
             if self._root and self._root.styleSheet():
                 self._root.setStyleSheet("")   # <- limpa override local
                 self._root.style().unpolish(self._root)
                 self._root.style().polish(self._root)
+                # Após limpar, resetamos o hash para garantir re-aplicação
+                self._last_qss_hash = None
         except Exception:
             pass
 
         self._apply_palette_min(theme)
-        self._apply_qss(theme, dump=dump)
+        self._apply_qss(theme, dump=dump, cache_key=cache_key)
 
     def _animate_apply(self, old: Dict[str, Any], new: Dict[str, Any], ms: int) -> None:
         if self._timeline:
@@ -448,12 +452,12 @@ class ThemeService(QObject):
         self._timeline.setFrameRange(0, 100)
         self._timeline.setUpdateInterval(33)  # ~30 FPS para reduzir custo
 
-        old_vars = _coerce_vars(old)
-        new_vars = _coerce_vars(new)
+        old_vars = coerce_vars(old)
+        new_vars = coerce_vars(new)
 
         keys = {
             k for k in (old_vars.keys() & new_vars.keys())
-            if _is_hex(old_vars[k]) and _is_hex(new_vars[k])
+            if is_hex(old_vars[k]) and is_hex(new_vars[k])
         }
 
         end_heavy: Optional[Callable[[], None]] = getattr(self._root, "_end_heavy_anim", None)
@@ -463,7 +467,7 @@ class ThemeService(QObject):
             mix_vars = dict(new_vars)
             for k in keys:
                 ca, cb = QColor(old_vars[k]), QColor(new_vars[k])
-                mix_vars[k] = _lerp_color(ca, cb, t).name(
+                mix_vars[k] = lerp_color(ca, cb, t).name(
                     QColor.HexArgb if (ca.alpha() != 255 or cb.alpha() != 255) else QColor.HexRgb
                 )
             # aplica somente no ROOT durante a animação

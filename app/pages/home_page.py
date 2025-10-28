@@ -11,6 +11,7 @@ from PySide6.QtGui import QFontMetrics
 from ui.widgets.buttons import Controls, command_button, attach_popover
 from ui.widgets.async_button import AsyncTaskButton
 from ui.widgets.toast import show_toast, ProgressToast
+from ui.core.utils.helpers import *
 
 # <<< NOVO: tentar usar o barramento do centro de notificações (failsafe) >>>
 try:
@@ -257,7 +258,6 @@ class HomePage(QWidget):
         scroller.setFrameShape(QFrame.NoFrame)
         outer.addWidget(scroller)
 
-        self.setMinimumSize(900, 640)
 
         # Conteúdo (transparente para herdar gradiente do #FramelessFrame)
         content = QWidget()

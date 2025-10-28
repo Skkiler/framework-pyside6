@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 from typing import Dict, Any, Optional, Callable, List, Tuple
+from ui.core.utils.helpers import autosize_button, apply_shadow
 
 from PySide6.QtCore import (
     QEasingCurve, QVariantAnimation, Qt, QSize, QRectF, Property, Signal,
     QTimer, QObject, QEvent, QPoint, QPropertyAnimation
 )
-from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen, QBrush, QMouseEvent, QCursor, QPainterPath
+from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen, QBrush, QMouseEvent, QCursor, QPainterPath, QWheelEvent
 from PySide6.QtWidgets import (
     QPushButton, QMessageBox, QGraphicsDropShadowEffect,
     QCheckBox, QComboBox, QLineEdit, QToolButton, QLabel,
@@ -70,18 +71,15 @@ class HoverButton(QPushButton):
         size_preset: Optional[str] = None
     ):
         super().__init__(text, parent)
-
         self.setFlat(False)
         self.setAutoDefault(False)
         self.setDefault(False)
         self.setCursor(Qt.PointingHandCursor)
-
         # Glow/sombra
-        self._shadow = QGraphicsDropShadowEffect(self)
-        self._shadow.setOffset(0, 0)
-        self._shadow.setBlurRadius(4)
-        self._shadow.setColor(QColor(0, 0, 0, 0))
-        self.setGraphicsEffect(self._shadow)
+        self._shadow = apply_shadow(self)
+        # Autosize
+        size = autosize_button(self, pad_x or 16, pad_y or 7, min_h or 34)
+        self.setMinimumSize(size)
 
         self._anim = QVariantAnimation(self)
         self._anim.setDuration(140)
@@ -352,7 +350,7 @@ class ExpandMoreButton(QWidget):
     def __init__(self, target: QWidget, parent=None,
                  text_collapsed: str = "Ver mais detalhes",
                  text_expanded: str = "Ver menos detalhes",
-                 duration_ms: int = 220):
+                 duration_ms: int = 260):
         super().__init__(parent)
         self._target = target
         self._expanded = False
@@ -374,7 +372,7 @@ class ExpandMoreButton(QWidget):
         self.btn.clicked.connect(self.toggle)
         root.addWidget(self.btn, 0, Qt.AlignLeft)
 
-        # Wrapper + painel interno
+        # Wrapper + painel interno (wrapper simples para manter fluxo)
         self._wrapper = ExpandMoreButton._Wrapper(self)
 
         try:
@@ -399,23 +397,24 @@ class ExpandMoreButton(QWidget):
         wrap_lay = QVBoxLayout(self._wrapper)
         wrap_lay.setContentsMargins(0, 0, 0, 0)
         wrap_lay.setSpacing(0)
+        # Conteúdo vai direto dentro do wrapper; animamos a altura do wrapper
         wrap_lay.addWidget(self._panel)
 
-        # começa fechado
+        # começa fechado (animaremos maximumHeight do wrapper – padrão mais estável)
         self._wrapper.setMinimumHeight(0)
         self._wrapper.setMaximumHeight(0)
-        self._wrapper.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self._wrapper.show()  # mantemos no fluxo, mas colapsado
+        self._wrapper.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self._wrapper.show()
         root.addWidget(self._wrapper)
 
-        # animação de altura
-        self._h_anim = QPropertyAnimation(self._wrapper, b"animHeight", self)
+        # animação de altura (maximumHeight do wrapper)
+        self._h_anim = QPropertyAnimation(self._wrapper, b"maximumHeight", self)
         self._h_anim.setDuration(self._duration)
         self._h_anim.setEasingCurve(QEasingCurve.OutCubic)
         self._h_anim.finished.connect(self._on_anim_finished)
 
         # contexto freezer de scroll
-        self._scroll_ctx = None  # dict|None
+        self._scroll_ctx = None  # desativado: não usamos freezer de scroll nesta versão
         self._need_repolish = False
 
         # se quiser realmente esconder quando fechado, troque para True
@@ -446,84 +445,13 @@ class ExpandMoreButton(QWidget):
 
     # ---------- freezer ----------
     def _freeze_scroll_start(self):
-        sa = self._find_scroller()
-        if not sa:
-            self._scroll_ctx = None
-            return
-        vbar = sa.verticalScrollBar()
-        if not vbar:
-            self._scroll_ctx = None
-            return
-
-        old_max = vbar.maximum()
-        val = vbar.value()
-
-        keep_top = val
-        keep_bottom = max(0, old_max - val)
-        rel = 0.0 if old_max <= 0 else min(1.0, max(0.0, val / float(old_max)))
-
-        NEAR = 48
-        if keep_top <= NEAR:
-            anchor = "top"
-            keep = keep_top
-        elif keep_bottom <= NEAR:
-            anchor = "bottom"
-            keep = keep_bottom
-        else:
-            anchor = "relative"
-            keep = rel
-
-        def set_value_safely(target_value: int):
-            bs = vbar.blockSignals(True)
-            vbar.setValue(max(0, min(vbar.maximum(), target_value)))
-            vbar.blockSignals(bs)
-
-        def on_range_changed(_min, new_max):
-            if anchor == "top":
-                tgt = min(keep, new_max)
-            elif anchor == "bottom":
-                tgt = max(0, new_max - keep)
-            else:  # relative
-                tgt = int(round(new_max * keep))
-            set_value_safely(tgt)
-
-        vbar.rangeChanged.connect(on_range_changed)
-
-        self._scroll_ctx = {
-            "area": sa,
-            "bar": vbar,
-            "anchor": anchor,
-            "keep": keep,
-            "slot": on_range_changed,
-            "setter": on_range_changed,  # p/ snaps manuais
-        }
+        # Freezer de scroll desativado para evitar oscilações enquanto anima
+        self._scroll_ctx = None
 
     def _freeze_scroll_release_after_layout(self):
         """Solta o freezer após estabilizar layout; aplica 'duplo snap'."""
-        ctx = self._scroll_ctx
-        if not ctx:
-            return
-        vbar = ctx["bar"]
-
-        def snap_once():
-            try:
-                ctx["setter"](vbar.minimum(), vbar.maximum())
-            except Exception:
-                pass
-
-        # Snap imediato (range já deve ter estabilizado)
-        snap_once()
-
-        # Snap extra no próximo loop para capturar repaints/QSS tardios
-        def final_release():
-            snap_once()
-            try:
-                vbar.rangeChanged.disconnect(ctx["slot"])
-            except Exception:
-                pass
-            self._scroll_ctx = None
-
-        QTimer.singleShot(0, final_release)
+        # Freezer desativado
+        return
 
     # ---------- api ----------
     def isExpanded(self) -> bool:
@@ -539,16 +467,20 @@ class ExpandMoreButton(QWidget):
         if self._expanded:
             # ABRIR
             self._wrapper.show()
-            self._wrapper.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            # Durante a animação a altura é controlada: usa Fixed p/ estabilizar layout
+            self._wrapper.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-            self._panel.updateGeometry()
-            self._wrapper.updateGeometry()
-            end_h = max(1, self._panel.sizeHint().height())
+            end_h = self._target_height()
+            # ponto inicial = altura atual visível (não o máximo), evita salto e garante animação
             start_h = max(0, self._wrapper.height())
-
-            self._freeze_scroll_start()
+            self._wrapper.setMaximumHeight(start_h)
+            # Abrindo: não ancoramos o viewport; deixa empurrar o conteúdo abaixo
 
             self._h_anim.stop()
+            try:
+                self._h_anim.setEasingCurve(QEasingCurve.OutCubic)
+            except Exception:
+                pass
             self._h_anim.setStartValue(start_h)
             self._h_anim.setEndValue(end_h)
             self.btn.setText(self._text_expanded)
@@ -559,13 +491,21 @@ class ExpandMoreButton(QWidget):
             for w in self._panel.findChildren(QWidget):
                 w.clearFocus()
 
+            # ponto inicial = altura atual visível
             start_h = max(0, self._wrapper.height())
-
-            self._freeze_scroll_start()
+            self._wrapper.setMaximumHeight(start_h)
+            # Fechando: mantemos Fixed para reduzir reflow
+            # e não ancoramos o viewport — scroll segue natural
+            self._lock_vbar_presence()
 
             self._h_anim.stop()
             self._h_anim.setStartValue(start_h)
             self._h_anim.setEndValue(0)
+            # curva de fechamento levemente diferente para suavizar retração
+            try:
+                self._h_anim.setEasingCurve(QEasingCurve.InOutCubic)
+            except Exception:
+                pass
             self.btn.setText(self._text_collapsed)
             self._h_anim.start()
 
@@ -574,14 +514,14 @@ class ExpandMoreButton(QWidget):
 
     # ---------- slots ----------
     def _on_anim_finished(self):
-        # Mantém freezer ativo enquanto ajustamos políticas/tamanhos
+        # Ajustes finais após animação
         if self._expanded:
-            # Aberto: solta limites e permite crescer naturalmente
+            # Aberto: libera limites para crescer naturalmente
             self._wrapper.setMinimumHeight(0)
             self._wrapper.setMaximumHeight(16777215)
             self._wrapper.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         else:
-            # Fechado: NÃO usa hide(); colapsa mantendo no fluxo
+            # Fechado: mantém no fluxo, porém altura máxima = 0, vertical Fixed
             self._wrapper.setMinimumHeight(0)
             self._wrapper.setMaximumHeight(0)
             self._wrapper.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -594,8 +534,53 @@ class ExpandMoreButton(QWidget):
             self._repolish(self)
             self._need_repolish = False
 
-        # Libera o freezer somente após o layout consolidar + snap extra
-        QTimer.singleShot(0, self._freeze_scroll_release_after_layout)
+        # Libera lock de barra caso tenha sido aplicado
+        self._unlock_vbar_presence()
+
+    # ---------- medidas ----------
+    def _target_height(self) -> int:
+        try:
+            # Atualiza layouts para obter a altura correta para a largura atual
+            lay = self._panel.layout()
+            if lay:
+                lay.activate()
+            self._panel.adjustSize()
+            h1 = self._panel.sizeHint().height()
+            h2 = self._panel.minimumSizeHint().height()
+            h3 = lay.sizeHint().height() if lay else 0
+            return max(1, h1, h2, h3)
+        except Exception:
+            return max(1, self._panel.sizeHint().height())
+
+    # ---------- vbar presence lock: evita aparecer/desaparecer durante fechamento ----------
+    def _lock_vbar_presence(self):
+        try:
+            sa = self._find_scroller()
+            if not sa:
+                self._vbar_lock = None; return
+            pol = sa.verticalScrollBarPolicy()
+            vbar = sa.verticalScrollBar()
+            if vbar is not None and vbar.isVisible():
+                sa.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+                self._vbar_lock = {"sa": sa, "pol": pol}
+            else:
+                self._vbar_lock = {"sa": sa, "pol": pol}
+        except Exception:
+            self._vbar_lock = None
+
+    def _unlock_vbar_presence(self):
+        ctx = getattr(self, "_vbar_lock", None)
+        if not ctx:
+            return
+        try:
+            sa = ctx.get("sa")
+            pol = ctx.get("pol")
+            if sa and pol is not None:
+                sa.setVerticalScrollBarPolicy(pol)
+        except Exception:
+            pass
+        finally:
+            self._vbar_lock = None
 
 
 
@@ -870,6 +855,41 @@ class StyledScrollArea(QScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.setObjectName("StyledScrollArea")
+        try:
+            self.viewport().setAutoFillBackground(False)
+        except Exception:
+            pass
+        # Estabiliza largura do conteúdo: reserva margem quando a vbar NÃO está visível,
+        # remove quando estiver visível (conteúdo mantém largura constante).
+        try:
+            self._vbw = max(8, self.verticalScrollBar().sizeHint().width())
+            self.verticalScrollBar().rangeChanged.connect(self._apply_stable_margin)
+        except Exception:
+            self._vbw = 10
+        # primeira aplicação
+        self._apply_stable_margin()
+
+    def _apply_stable_margin(self, *_):
+        try:
+            vb = self.verticalScrollBar()
+            visible = vb.maximum() > 0
+            self.setViewportMargins(0, 0, 0 if visible else int(self._vbw), 0)
+        except Exception:
+            pass
+
+    def wheelEvent(self, e: QWheelEvent):
+        # Pressionando SHIFT, o scroll do mouse controla a barra horizontal
+        if e.modifiers() & Qt.ShiftModifier:
+            hbar = self.horizontalScrollBar()
+            if hbar is not None:
+                delta = e.angleDelta()
+                # Usa delta vertical como base para deslocamento horizontal
+                dv = int(delta.y())
+                if dv != 0:
+                    hbar.setValue(hbar.value() - dv)
+                    e.accept()
+                    return
+        super().wheelEvent(e)
 
 
 # ============================================================
@@ -992,3 +1012,10 @@ class Controls:
     Popover    = Popover
     Slider     = UiSlider
     ScrollArea = StyledScrollArea
+    # Toolbar exports (import leve para evitar ciclos)
+    try:
+        from ui.widgets.toolbar import Toolbar as _Toolbar, ToolbarMenuButton as _ToolbarMenuButton
+        Toolbar = _Toolbar
+        ToolbarMenuButton = _ToolbarMenuButton
+    except Exception:
+        pass

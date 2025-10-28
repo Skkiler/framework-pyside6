@@ -12,6 +12,28 @@
   border: 1px solid {box_border};
 }
 
+#ToastFrame {
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 {bg_start}, stop:1 {bg_end});
+  color: {text};
+  font-family: 'Segoe UI', Arial, sans-serif;
+  font-size: 12px;
+  border-radius: 12px;
+  border: 1px solid {box_border}; /* borda externa visível do toast */
+}
+
+/* Dentro de um toast, esconda o frame padrão do FramelessWindow */
+QWidget[toast="true"] #FramelessFrame {
+  background: transparent;
+  border: none;
+}
+
+/* Evita "linha dupla" no topo do toast: o TopBar já tem borda inferior */
+#ToastFrame #TopBar {
+  border-bottom: none;
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+}
+
 /* Conteúdo deve ser transparente para herdar do frame */
 #FramelessContent {
   background: transparent;
@@ -49,6 +71,32 @@ QWidget, QLabel { color: {text}; }
   border-top-left-radius: 0;
   border-top-right-radius: 0;
 }
+
+/* ===== Toolbar da Página ===== */
+#PageToolbarArea { background: transparent; }
+#PageToolbar {
+  background: {content_bg};
+  border-bottom: 1px solid {box_border};
+}
+#ToolbarButton, #ToolbarMenuButton {
+  background: transparent;
+  color: {text};
+  border: 1px solid transparent;
+  border-radius: 14px;
+  padding: 6px 10px;
+  font-weight: 600;
+}
+#ToolbarButton:hover, #ToolbarMenuButton:hover { background: {hover}; }
+#ToolbarButton:pressed, #ToolbarMenuButton:pressed { background: {btn}; color: {btn_text}; }
+
+#ToolbarMenuPanel {
+  background: {surface};
+  border: 1px solid {box_border};
+  border-radius: 10px;
+}
+#ToolbarMenuItem { background: transparent; border: none; }
+#ToolbarMenuItem:hover { background: {hover}; border-radius: 6px; }
+#ToolbarMenuItem QLabel[arrow="true"] { color: {box_border}; }
 
 /* SidePanel (overlay) */
 #SidePanel {

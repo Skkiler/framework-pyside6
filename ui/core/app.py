@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable
+from typing import Optional, Iterable, Any
 import json
 
 from PySide6.QtGui import QIcon, QShortcut, QKeySequence
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QApplication
-from PySide6.QtCore import QFileSystemWatcher, QTimer
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QApplication, QFrame, QScrollArea
+from PySide6.QtCore import QFileSystemWatcher, QTimer, Qt
 
 from .router import Router
 from .settings import Settings
@@ -16,7 +16,6 @@ from .theme_service import ThemeService
 from .frameless_window import FramelessWindow
 
 from ui.services.theme_repository_json import JsonThemeRepository
-
 from ui.widgets.topbar import TopBar
 from ui.widgets.overlay_sidebar import OverlaySidePanel
 from ui.widgets.push_sidebar import PushSidePanel
@@ -24,7 +23,11 @@ from ui.widgets.titlebar import TitleBar
 from ui.widgets.toast import notification_bus
 from ui.widgets.settings_sidebar import SettingsSidePanel
 
-from ui.core.utils.factories import call_with_known_kwargs
+from .utils.helpers import create_layout_widget
+from .utils.resource_manager import ResourceManager
+from .utils.page_manager import PageManager
+from .utils.paths import safe_icon
+from .utils.factories import call_with_known_kwargs
 
 from app.pages.notificacoes import NotificationCenter
 from app.pages.settings import build as build_settings_page
@@ -34,48 +37,85 @@ try:
 except Exception:
     S = None
 
-# utils
-from .utils.paths import ensure_dir, safe_icon
-
 
 class AppShell(FramelessWindow):
+    """
+    Shell principal da aplicação seguindo o princípio da Responsabilidade Única (SRP).
+    Esta classe coordena os componentes principais da UI.
+    """
 
     def __init__(self, title: str, assets_dir: str, themes_dir: str, base_qss_path: str, settings: Settings):
         super().__init__()
         self.setWindowTitle(title)
         self.setObjectName("RootWindow")
         self.resize(1100, 720)
+        self._page_labels = {}
 
-        self.assets_dir = Path(assets_dir)
-        self.cache_dir = ensure_dir(self.assets_dir / "cache")
+        # Inicializa gerenciadores
+        self.resources = ResourceManager(assets_dir)
         self.settings = settings
+        self.page_manager = PageManager()
 
         # Router com histórico (limit 100)
         self.router = Router(history_limit=100)
 
+        # Serviço de temas
         self.theme_service = ThemeService(
             repo=JsonThemeRepository(themes_dir),
             root=self,
             settings=self.settings,
             base_qss_path=base_qss_path,
             animate_ms_default=450,
-            cache_dir=self.cache_dir,
+            cache_dir=self.resources.cache_dir,
         )
 
+        # Constrói a UI
+        self._build_ui(title)
+
+    def register_pages(self, specs: Iterable[tuple[str, Any]], *, task_runner=None) -> None:
+        """
+        Registra páginas na aplicação.
+        
+        Args:
+            specs: Iterável de tuplas (page_id, factory)
+            task_runner: Runner opcional para tarefas assíncronas
+        """
+        dependencies = {"theme_service": self.theme_service}
+        if task_runner:
+            dependencies["task_runner"] = task_runner
+
+        for page_id, factory in specs:
+            self.page_manager.register(page_id, factory, **dependencies)
+            
+    def _go(self, page_id: str, **kwargs: Any) -> None:
+        """Navega para uma página."""
+        if not self.page_manager.has_page(page_id):
+            return
+            
+        page = self.page_manager.create(page_id, **kwargs)
+        if page:
+            self.router.push(page)
+            
+    def _build_ui(self, title: str) -> None:
+        """Constrói os elementos principais da UI."""
+        # Widget central
         central = self._build_central(title)
         self.setCentralWidget(central)
 
-        # Conecta sinais do Router
+        # Conecta eventos
         self._wire_router_events()
-
-        # Sincroniza ícone com o tema (titlebar + taskbar)
         self._setup_theme_icon_sync()
 
-        # Sidebar (navegação overlay tradicional)
-        self.sidebar = OverlaySidePanel(parent=central, use_scrim=True, close_on_scrim=True, close_on_select=True)
+        # Sidebar de navegação
+        self.sidebar = OverlaySidePanel(
+            parent=central,
+            use_scrim=True,
+            close_on_scrim=True,
+            close_on_select=True
+        )
         self.sidebar.pageSelected.connect(self._go)
 
-        # Sidebar (configurações overlay)
+        # Sidebar de configurações
         self._settings_widget = build_settings_page(theme_service=self.theme_service)
         self.settings_panel = SettingsSidePanel(
             parent=central,
@@ -84,18 +124,45 @@ class AppShell(FramelessWindow):
             close_on_scrim=True,
         )
 
-        # ===== Centro de Notificações — PUSH SIDEBAR à direita =====
-        # Conteúdo do centro
-        self._notif_center = NotificationCenter(self)
+        # Centro de Notificações
+        self._build_notification_center(central)
 
+    def _build_central(self, title: str) -> QWidget:
+        """Constrói o widget central com layout."""
+        # Container principal
+        container = create_layout_widget(QVBoxLayout, parent=self)
+        
+        # Barra de título
+        titlebar = TitleBar(title, parent=container)
+        titlebar.minimizeClicked.connect(self.showMinimized)
+        titlebar.maximizeClicked.connect(self.toggleMaximized)
+        titlebar.closeClicked.connect(self.close)
+        container.layout().addWidget(titlebar)
+
+        # Container de conteúdo com layout horizontal
+        content = create_layout_widget(QHBoxLayout, parent=container)
+        content.layout().setContentsMargins(0, 0, 0, 0)
+        container.layout().addWidget(content)
+
+        # Área principal de conteúdo
+        self._central_widget = QWidget()
+        self._central_widget.setObjectName("CentralWidget")
+        content.layout().addWidget(self._central_widget)
+
+        self._content_hbox = content.layout()
+        return container
+
+    def _build_notification_center(self, parent: QWidget) -> None:
+        """Constrói o centro de notificações."""
+        self._notif_center = NotificationCenter(self)
         self._notif_panel = PushSidePanel(
-            parent=self._central_widget.parent(),
+            parent=parent,
             content=self._notif_center,
             title="Notificações",
             width=360,
         )
 
-        if hasattr(self, "_content_hbox") and self._content_hbox is not None:
+        if self._content_hbox is not None:
             self._content_hbox.addWidget(self._notif_panel)
         else:
             print("[WARN] Layout _content_hbox não existe, notificações não visíveis!")
@@ -108,10 +175,6 @@ class AppShell(FramelessWindow):
         # Atualiza badge conforme entradas mudam
         if hasattr(self._notif_center, "countChanged"):
             self._notif_center.countChanged.connect(self.topbar.setUnreadCountRequested.emit)
-
-        # Dicionário de rotas -> labels (preenchido ao registrar páginas)
-        self._page_labels: dict[str, str] = {}
-        self._all_pages = []  # type: list
 
     # ---------------------------------------------------------
     #  Montagem da UI
@@ -126,7 +189,7 @@ class AppShell(FramelessWindow):
         root_v.setSpacing(0)
 
         # TitleBar (janela principal)
-        icon_path = self.assets_dir / "icons" / "app" / "app.ico"
+        icon_path = self.resources.assets_dir / "icons" / "app" / "app.ico"
         icon_ref = safe_icon(icon_path)
         self.titlebar = TitleBar(title, self, icon=icon_ref)
         root_v.addWidget(self.titlebar)
@@ -142,6 +205,17 @@ class AppShell(FramelessWindow):
         except Exception:
             pass
         root_v.addWidget(self.topbar)
+
+        # Área da Toolbar da página (opcional)
+        self.toolbar_area = QFrame(central)
+        self.toolbar_area.setObjectName("PageToolbarArea")
+        self.toolbar_area.setAttribute(Qt.WA_StyledBackground, True)
+        self.toolbar_area.hide()
+        tb_lay = QHBoxLayout(self.toolbar_area)
+        tb_lay.setContentsMargins(0, 0, 0, 0)
+        tb_lay.setSpacing(0)
+        self._toolbar_layout = tb_lay
+        root_v.addWidget(self.toolbar_area)
 
         # Router (conteúdo principal) + espaço para o push sidebar à direita
         content = QHBoxLayout()
@@ -223,6 +297,36 @@ class AppShell(FramelessWindow):
         except Exception:
             pass
 
+        # ----- Geometria inicial -----
+        try:
+            start_max = bool(self.settings.get("window.start_maximized", False))
+        except Exception:
+            start_max = False
+
+        try:
+            ag = self._available_rect() if hasattr(self, "_available_rect") else self.screen().availableGeometry()
+        except Exception:
+            from PySide6.QtCore import QRect
+            ag = QRect(0, 0, 1280, 720)
+
+        if start_max:
+            # Maximiza sem animação e atualiza TitleBars
+            self.setGeometry(ag)
+            self._is_maximized = True
+            for tb in getattr(self, "_titlebars", []) or []:
+                if hasattr(tb, "setMaximized"):
+                    try:
+                        tb.setMaximized(True)
+                    except Exception:
+                        pass
+        else:
+            # 1/4 da área de tela (metade de cada dimensão), centralizado
+            w = max(320, int(ag.width() * 0.5))
+            h = max(200, int(ag.height() * 0.5))
+            x = ag.center().x() - w // 2
+            y = ag.center().y() - h // 2
+            self.setGeometry(x, y, w, h)
+
     # ---------------------------------------------------------
     #  Ações simples
     # ---------------------------------------------------------
@@ -256,6 +360,7 @@ class AppShell(FramelessWindow):
     def _on_route_changed(self, path: str, params: dict):
         """Atualiza UI/persistência quando a rota muda (back/forward/go)."""
         self._update_topbar_for_route(path)
+        self._update_toolbar_for_current_page()
         try:
             self.settings.set("nav.last_route", path)
         except Exception:
@@ -283,6 +388,52 @@ class AppShell(FramelessWindow):
 
         if hasattr(self.topbar, "set_breadcrumb"):
             self.topbar.set_breadcrumb(parts if len(parts) > 1 else None)
+
+    # ---------------------- Toolbar por página ----------------------
+    def set_page_toolbar(self, toolbar: QWidget | None):
+        try:
+            lay = self._toolbar_layout
+            # limpa widgets antigos
+            while lay.count():
+                item = lay.takeAt(0)
+                w = item.widget()
+                if w:
+                    w.setParent(None)
+            if toolbar is not None:
+                lay.addWidget(toolbar)
+                self.toolbar_area.show()
+            else:
+                self.toolbar_area.hide()
+        except Exception as e:
+            print("[WARN] set_page_toolbar falhou:", e)
+
+    def _update_toolbar_for_current_page(self):
+        try:
+            page = self.router.currentWidget()
+            # Se a página estiver embrulhada por um QScrollArea (wrapper global),
+            # desce até o widget real da página para buscar build_toolbar/toolbar.
+            if isinstance(page, QScrollArea):
+                container = page.widget()
+                if container and hasattr(container, "layout") and container.layout() is not None:
+                    lay = container.layout()
+                    # tenta pegar o primeiro widget do layout (página real)
+                    for i in range(lay.count()):
+                        it = lay.itemAt(i)
+                        if it and it.widget():
+                            page = it.widget()
+                            break
+            tb = None
+            if page is not None:
+                # Se a página expõe build_toolbar() retornando um QWidget, usamos
+                build = getattr(page, "build_toolbar", None)
+                if callable(build):
+                    tb = build()
+                else:
+                    # ou aceita atributo 'toolbar' pré-montado
+                    tb = getattr(page, "toolbar", None)
+                self.set_page_toolbar(tb if isinstance(tb, QWidget) else None)
+        except Exception as e:
+            print("[WARN] _update_toolbar_for_current_page:", e)
 
     def _open_quick_open(self):
         """Abre Quick Open (Ctrl+K) frameless, modal e estilizado pelo base.qss."""

@@ -7,10 +7,16 @@ from PySide6.QtCore import (
     Qt, QRect, QPoint, QEasingCurve, QPropertyAnimation, QEvent, QSize, QObject,
     QParallelAnimationGroup, QSequentialAnimationGroup, QTimer, QEventLoop,
 )
-from PySide6.QtGui import QMouseEvent, QKeySequence, QCursor, QShortcut, QGuiApplication
+from PySide6.QtGui import (
+    QMouseEvent, QKeySequence, QCursor, QShortcut, QGuiApplication, QWheelEvent,
+    QPainterPath, QRegion, QColor
+)
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QGraphicsDropShadowEffect, QDialog, QSizePolicy,
+    QScrollArea, QFrame,
 )
+
+from ui.core.utils.helpers import create_animation, apply_shadow, get_resize_edges
 
 # =============================================================================
 #  TUNÁVEIS (centralizados)
@@ -59,8 +65,9 @@ class FramelessWindow(QMainWindow):
 
         # --- NOVO: parâmetros de resize configuráveis ---
         self._edges_enabled = True            # permite desligar resize pelas bordas
-        self._min_resize_w = 400              # mínimos usados no algoritmo de resize
-        self._min_resize_h = 300
+        # Mínimos internos do algoritmo de resize: 1x1 por padrão (sem tamanho mínimo imposto)
+        self._min_resize_w = 1
+        self._min_resize_h = 1
 
         self._geo_anim: Optional[QPropertyAnimation] = None
         self._fade_anim: Optional[QPropertyAnimation] = None
@@ -73,6 +80,9 @@ class FramelessWindow(QMainWindow):
         self._shadow_ready = False
         self._heavy_animating = False
         self._first_show_done = False
+        self._corner_radius = 8  # acompanha base.qss (#FramelessFrame)
+        self._use_shadow = True  # permite desativar em subclasses (dialogs)
+        self._use_rounded_mask = True  # máscara arredondada (para sombras curvadas)
 
         # ---- FRAME + CONTENT --------------------------------------------------
         self._frame = QWidget(self)
@@ -106,7 +116,18 @@ class FramelessWindow(QMainWindow):
 
     # ================================================================== Sombra
     def _ensure_shadow(self):
+        # Permite desligar sombra completamente (ex.: diálogos com borda)
         if self._shadow_ready:
+            if not self._use_shadow and self._shadow_effect is not None:
+                try:
+                    self._frame.setGraphicsEffect(None)
+                except Exception:
+                    pass
+                self._shadow_effect = None
+            return
+        if not self._use_shadow:
+            self._shadow_effect = None
+            self._shadow_ready = True
             return
         try:
             eff = QGraphicsDropShadowEffect(self._frame)
@@ -118,6 +139,31 @@ class FramelessWindow(QMainWindow):
         except Exception:
             self._shadow_effect = None
         self._shadow_ready = True
+
+    def _apply_rounded_mask(self, radius: int | float | None = None):
+        """Aplica uma máscara arredondada no frame para que a sombra acompanhe a curvatura."""
+        try:
+            if not getattr(self, "_use_rounded_mask", True):
+                try:
+                    self._frame.clearMask()
+                except Exception:
+                    pass
+                return
+            r = float(radius if radius is not None else self._corner_radius)
+            if r <= 0:
+                # limpa máscara
+                try:
+                    self._frame.clearMask()
+                except Exception:
+                    pass
+                return
+            rect = self._frame.rect()
+            path = QPainterPath()
+            path.addRoundedRect(rect, r, r)
+            region = QRegion(path.toFillPolygon().toPolygon())
+            self._frame.setMask(region)
+        except Exception:
+            pass
 
     def _set_shadow_enabled(self, enabled: bool):
         if not self._shadow_ready or self._shadow_effect is None:
@@ -290,6 +336,31 @@ class FramelessWindow(QMainWindow):
 
     # ----------------------------------------------------------------- filters
     def eventFilter(self, obj: QObject, ev):
+        # SHIFT + scroll do mouse => mover scrollbar horizontal
+        if ev.type() == QEvent.Wheel:
+            try:
+                we: QWheelEvent = ev  # type: ignore
+                if we.modifiers() & Qt.ShiftModifier:
+                    # encontra um ancestral com barras de rolagem
+                    w = obj if hasattr(obj, 'horizontalScrollBar') else None
+                    if w is None and isinstance(obj, QWidget):
+                        p = obj.parentWidget()
+                        while p is not None and not hasattr(p, 'horizontalScrollBar'):
+                            p = p.parentWidget()
+                        w = p
+                    if w is not None and hasattr(w, 'horizontalScrollBar'):
+                        try:
+                            hbar = w.horizontalScrollBar()
+                            if hbar is not None:
+                                dv = int(we.angleDelta().y())
+                                if dv != 0:
+                                    hbar.setValue(hbar.value() - dv)
+                                    return True
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
         # novos filhos => manter hover/resize funcionando
         if ev.type() == QEvent.ChildAdded:
             child = ev.child()
@@ -728,6 +799,8 @@ class FramelessWindow(QMainWindow):
     def resizeEvent(self, e):
         if self._is_maximized:
             self.unsetCursor()
+        # Atualiza a máscara arredondada a cada resize (quando habilitada)
+        self._apply_rounded_mask()
         super().resizeEvent(e)
 
 
@@ -740,11 +813,46 @@ class FramelessDialog(FramelessWindow):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setWindowModality(Qt.ApplicationModal)
         self._result_code = QDialog.Rejected
-        self.setMinimumSize(360, 180)
         self._loop = None
+        self._corner_radius = 8  # igual ao #FramelessFrame no QSS para evitar clipe de borda
+        # Desliga sombra externa; usamos borda no frame (#FramelessFrame)
+        self._use_shadow = False
+        # Máscara arredondada desabilitada em diálogos (evita serrilhado na borda)
+        self._use_rounded_mask = False
+        try:
+            self._frame.clearMask()
+        except Exception:
+            pass
 
         # Política de centralização: "window" (padrão), "screen" ou "parent"
         self._center_mode: str = "window"
+
+        # ---- Envolve o conteúdo em um QScrollArea com barras automáticas ----
+        try:
+            # Remove o conteúdo atual do frame e re-insere via QScrollArea
+            if hasattr(self, "_frame_layout") and hasattr(self, "_content"):
+                try:
+                    self._frame_layout.removeWidget(self._content)
+                except Exception:
+                    pass
+                self._content.setParent(None)
+
+                self._scroller = QScrollArea(self._frame)
+                self._scroller.setObjectName("FramelessScrollArea")
+                self._scroller.setWidgetResizable(True)
+                self._scroller.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+                self._scroller.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+                self._scroller.setFrameShape(QFrame.NoFrame)
+                try:
+                    self._scroller.viewport().setAutoFillBackground(False)
+                except Exception:
+                    pass
+
+                self._scroller.setWidget(self._content)
+                self._frame_layout.addWidget(self._scroller)
+        except Exception:
+            # Fallback silencioso: se algo der errado, mantemos sem scroller
+            pass
 
     # ------------------- API pública extra -------------------
     def set_center_mode(self, mode: str):
@@ -767,11 +875,117 @@ class FramelessDialog(FramelessWindow):
         except Exception:
             self.close()
 
+    # ------------------- Exec modal -------------------
+    def exec(self) -> int:
+        # tamanho razoável antes de centralizar
+        if self.width() <= 1 or self.height() <= 1:
+            sh = self.sizeHint()
+            default_w, default_h = 640, 360
+            if sh.isValid():
+                self.resize(sh)
+            else:
+                self.resize(QSize(default_w, default_h))
+        self._center_over_parent()
+        self.show()
+        self._loop = QEventLoop(self)
+        self._loop.exec()
+        self._loop = None
+        return self._result_code
+
+    def closeEvent(self, e):
+        try:
+            if self._loop is not None and self._loop.isRunning():
+                self._loop.quit()
+        except Exception:
+            pass
+        super().closeEvent(e)
+
+    # ------------------- Centralização -------------------
+    def _center_over_parent(self):
+        """Centraliza conforme a política (_center_mode)."""
+        try:
+            if self.width() <= 1 or self.height() <= 1:
+                sh = self.sizeHint()
+                self.resize(sh if sh.isValid() else QSize(max(self.minimumWidth(), 360), max(self.minimumHeight(), 180)))
+
+            anchor = None
+            if self._center_mode == "window":
+                anchor = self.window()
+            elif self._center_mode == "parent":
+                anchor = self.parentWidget()
+
+            center_global = None
+            if anchor and isinstance(anchor, QWidget) and anchor.isVisible():
+                center_global = anchor.mapToGlobal(anchor.rect().center())
+
+            screen = QGuiApplication.screenAt(center_global) if center_global else None
+            if not screen:
+                if anchor and anchor.windowHandle():
+                    screen = anchor.windowHandle().screen()
+                elif self.windowHandle():
+                    screen = self.windowHandle().screen()
+                else:
+                    screen = QGuiApplication.primaryScreen()
+
+            ag = screen.availableGeometry()
+            target_center = ag.center() if (self._center_mode == "screen" or center_global is None) else center_global
+            x = target_center.x() - self.width() // 2
+            y = target_center.y() - self.height() // 2
+            x = max(ag.left(),  min(x, ag.right()  - self.width()  + 1))
+            y = max(ag.top(),   min(y, ag.bottom() - self.height() + 1))
+            self.move(x, y)
+        except Exception:
+            pass
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        QTimer.singleShot(0, self._center_over_parent)
+
+    # Em diálogos modais, escondemos min/max para reduzir distração
+    def connect_titlebar(self, titlebar_widget: QWidget):
+        super().connect_titlebar(titlebar_widget)
+        for attr in ("btn_min", "btn_max"):
+            if hasattr(titlebar_widget, attr):
+                try:
+                    getattr(titlebar_widget, attr).hide()
+                except Exception:
+                    pass
+
+
+# =============================================================================
+#  Popup/Toast dialog (non-modal, stays-on-top)
+# =============================================================================
+class FramelessToastDialog(FramelessDialog):
+    """Variante não modal do FramelessDialog pensada para toasts/popups.
+
+    - Não bloqueia a UI (Qt.NonModal)
+    - Fica no topo e não rouba foco
+    - Mantém a mesma caixa/gradiente do FramelessDialog/Window
+    """
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        try:
+            self._corner_radius = 12
+            self.setWindowModality(Qt.NonModal)
+            self.setWindowFlags(
+                Qt.FramelessWindowHint
+                | Qt.Tool
+                | Qt.WindowStaysOnTopHint
+                | Qt.WindowDoesNotAcceptFocus
+            )
+        except Exception:
+            pass
+
     def exec(self) -> int:
         # Garante um tamanho razoável antes de centralizar
         if self.width() <= 1 or self.height() <= 1:
             sh = self.sizeHint()
-            self.resize(sh if sh.isValid() else QSize(max(self.minimumWidth(), 360), max(self.minimumHeight(), 180)))
+            # Usa um tamanho padrão inicial sem impor mínimos
+            default_w, default_h = 640, 360
+            if sh.isValid():
+                self.resize(sh)
+            else:
+                self.resize(QSize(default_w, default_h))
         self._center_over_parent()
         self.show()
         self._loop = QEventLoop(self)

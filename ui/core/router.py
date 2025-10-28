@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Dict, Optional
 from datetime import datetime
 
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QStackedWidget, QWidget
+from PySide6.QtCore import Signal, Qt
+from PySide6.QtWidgets import QStackedWidget, QWidget, QScrollArea, QFrame, QVBoxLayout
 
 
 class Router(QStackedWidget):
@@ -45,8 +45,57 @@ class Router(QStackedWidget):
         if path in self._pages:
             # último vence — mas é útil avisar no console em dev
             print(f"[WARN] sobrescrevendo rota já registrada: {path}")
-        self._pages[path] = widget
-        self.addWidget(widget)
+        wrapped = self._ensure_scroller(widget)
+        self._pages[path] = wrapped
+        self.addWidget(wrapped)
+
+    # --- Scroll wrapper automático ---
+    def _ensure_scroller(self, w: QWidget) -> QWidget:
+        try:
+            if isinstance(w, QScrollArea):
+                return w
+            # Se a página já possui um QScrollArea interno, não embrulhar
+            if w.findChild(QScrollArea) is not None:
+                return w
+            sa = QScrollArea()
+            sa.setObjectName("PageScrollArea")
+            sa.setFrameShape(QFrame.NoFrame)
+            sa.setWidgetResizable(True)
+            sa.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            sa.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            # Manter gradiente do #FramelessFrame: viewport transparente
+            try:
+                sa.viewport().setAutoFillBackground(False)
+            except Exception:
+                pass
+
+            # Conteúdo transparente igual ao Home: usa #FramelessContent e não pinta fundo
+            content = QWidget()
+            content.setObjectName("FramelessContent")
+            content.setAttribute(Qt.WA_StyledBackground, False)
+            lay = QVBoxLayout(content)
+            lay.setContentsMargins(0, 0, 0, 0)
+            lay.setSpacing(0)
+            try:
+                w.setParent(content)
+            except Exception:
+                pass
+            lay.addWidget(w)
+            sa.setWidget(content)
+            # Estabiliza largura: reserva margem quando vbar NÃO está visível; remove quando visível
+            try:
+                vb = sa.verticalScrollBar()
+                vbw = max(8, vb.sizeHint().width())
+                def _apply(*_args):
+                    vis = vb.maximum() > 0
+                    sa.setViewportMargins(0, 0, 0 if vis else vbw, 0)
+                vb.rangeChanged.connect(_apply)
+                _apply()
+            except Exception:
+                pass
+            return sa
+        except Exception:
+            return w
 
     # -------------------------------------------------------------------------
     # Navegação "go" (empilha histórico)

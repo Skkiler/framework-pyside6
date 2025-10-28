@@ -160,6 +160,33 @@ class SettingsPage(QWidget):
         splash_row.addStretch(1)
         lg.addLayout(splash_row)
 
+        # Toggle Janela inicial maximizada
+        start_row = QHBoxLayout()
+        start_row.setContentsMargins(0, 0, 0, 0)
+        start_row.setSpacing(8)
+
+        self.tgl_start_max = Controls.Toggle(width=34, height=18)
+        start_max = bool(self._st.read("window.start_maximized", False))
+        self.tgl_start_max.setChecked(start_max)
+
+        self.lbl_start_max = QLabel()
+        def _update_start_label(checked: bool):
+            self.lbl_start_max.setText(
+                "Abrir maximizado (1:1 com a tela)" if checked
+                else "Abrir centralizado (1/4 da tela)"
+            )
+        _update_start_label(self.tgl_start_max.isChecked())
+
+        def _on_start_toggle(v: bool):
+            self._st.write("window.start_maximized", bool(v))
+            _update_start_label(v)
+        self.tgl_start_max.toggled.connect(_on_start_toggle)
+
+        start_row.addWidget(self.tgl_start_max)
+        start_row.addWidget(self.lbl_start_max)
+        start_row.addStretch(1)
+        lg.addLayout(start_row)
+
         placeholder = QLabel("Mais opções em breve…")
         placeholder.setStyleSheet("opacity:0.7; font-size:11px;")
         lg.addWidget(placeholder)

@@ -104,14 +104,16 @@ def _normalize_vars(tokens: dict | None) -> dict:
     # Aliases '-' <-> '_' (accent-2 vs accent_2)
     mirror = {}
     for k, v in list(vars_.items()):
-        if "-" in k: mirror[k.replace("-", "_")] = v
-        if "_" in k: mirror[k.replace("_", "-")] = v
+        if "-" in k:
+            mirror[k.replace("-", "_")] = v
+        if "_" in k:
+            mirror[k.replace("_", "-")] = v
     vars_.update(mirror)
 
     # Derivados: content_bg = bg_start ~20% mais escuro (para fundos sólidos)
     bg0 = vars_.get("bg_start", _DEFAULTS["bg_start"])
-    vars_["content_bg"] = _darken_hex(bg0, 0.9)   # 120% “mais escuro” = 20% darker
-    vars_["panel_bg"]   = vars_["content_bg"]     # alias opcional
+    vars_["content_bg"] = _darken_hex(bg0, 0.9)
+    vars_["panel_bg"] = vars_["content_bg"]
 
     return vars_
 

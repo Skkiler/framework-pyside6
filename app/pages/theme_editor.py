@@ -123,7 +123,7 @@ class SwatchButton(QPushButton):
 class ThemeEditorDialog(FramelessDialog):
     def __init__(self, name: str, props: Optional[Dict[str, str] | Dict[str, Dict[str, str]]], parent=None):
         super().__init__(parent)
-        self.set_center_mode("window"); self.setMinimumWidth(720)
+        self.set_center_mode("window")
         self.theme_name = name
 
         incoming = {}

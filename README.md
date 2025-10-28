@@ -569,6 +569,37 @@ from ui.dialogs.quick_open import QuickOpenDialog
 dlg = QuickOpenDialog(self.window().router._pages.keys(), parent=self)
 dlg.exec()
 ```
+Toolbar (por página)
+
+Crie a toolbar na sua página implementando `build_toolbar()` e retornando um widget:
+
+```python
+from ui.widgets.buttons import Controls
+
+class MinhaPagina(QWidget):
+    def build_toolbar(self):
+        tb = Controls.Toolbar(self)
+
+        # Botão simples
+        tb.add_button("Início", on_click=lambda: self._go("home"))
+
+        # Menu com submenus
+        def item(text, trigger=None, submenu=None):
+            return {"text": text, "trigger": trigger, "submenu": submenu}
+
+        produtos = [
+            item("Novo", trigger=lambda: print("novo")),
+            item("Abrir", trigger=lambda: print("abrir")),
+        ]
+        tb.add_menu("Arquivo", produtos, open_mode="both")  # abre por hover e clique (temporário)
+        return tb
+```
+
+- `add_button(text, on_click)` — cria um botão simples.
+- `add_menu(label, items, open_mode)` — cria um botão de menu (hover/click/both). O menu permanece visível enquanto o mouse estiver sobre o botão ou sobre a lista/sub-listas.
+
+Exemplo completo: subpágina Guia Rápido (`home/guia`).
+
 ---
 ## Personalização Visual & Chrome
 - TitleBar: o ícone do app troca conforme o tema; ícones em `app/assets/icons/app/`.

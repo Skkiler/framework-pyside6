@@ -481,7 +481,33 @@ from ui.dialogs.quick_open import QuickOpenDialog
 dlg = QuickOpenDialog(self.window().router._pages.keys(), parent=self)
 dlg.exec()
 ```
+Toolbar (per page)
 
+Implement `build_toolbar()` on a page and return a widget:
+
+```python
+from ui.widgets.buttons import Controls
+
+class MyPage(QWidget):
+    def build_toolbar(self):
+        tb = Controls.Toolbar(self)
+        tb.add_button("Home", on_click=lambda: self._go("home"))
+
+        def item(text, trigger=None, submenu=None):
+            return {"text": text, "trigger": trigger, "submenu": submenu}
+
+        file_menu = [
+            item("New", trigger=lambda: print("new")),
+            item("Open", trigger=lambda: print("open")),
+        ]
+        tb.add_menu("File", file_menu, open_mode="both")  # opens by hover and by click (temporary)
+        return tb
+```
+
+- `add_button(text, on_click)` — simple toolbar button.
+- `add_menu(label, items, open_mode)` — toolbar menu button (hover/click/both). The menu remains visible while the cursor is over the button or the menu/submenus.
+
+Working example: Quick Guide subpage (`home/guia`).
 ---
 
 ## Visual Customization & Chrome
@@ -639,3 +665,4 @@ mypy ui app
 Suggested flow
 - Getting started: run `ruff check . --fix` and then `black .`; if imports need ordering, run `isort .`.
 - Power users: configure a pre-commit with `ruff`, `black` and `isort` or add these steps to your CI.
+
