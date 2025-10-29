@@ -179,6 +179,9 @@ class TitleBar(QWidget):
         self.setObjectName("TitleBar")
         self.setFixedHeight(36)
         self._icon_size = 20
+        # Pendências durante animações pesadas de tema
+        self._pending_icon = None
+        self._pending_icon_timer: QTimer | None = None
 
         root = QHBoxLayout(self)
         root.setContentsMargins(10, 0, 10, 0)
@@ -260,6 +263,15 @@ class TitleBar(QWidget):
         # Se acabamos de setar manualmente, ignorar este evento duplicado
         if self._suppress_next_win_icon_changed:
             return
+        # Se a janela sinalizou animação pesada de tema, postergar atualização do ícone
+        try:
+            w = self.window()
+            if w is not None and getattr(w, "_is_heavy_anim", False):
+                self._pending_icon = icon
+                self._ensure_pending_icon_timer()
+                return
+        except Exception:
+            pass
         try:
             self._icon.setIcon(icon, animate=True)
             self._icon.show()
@@ -273,6 +285,16 @@ class TitleBar(QWidget):
             self._lbl.setText(text)
 
     def setIcon(self, icon: Union[str, QPixmap, QIcon]) -> bool:
+        # Se animação pesada está ativa, posterga atualização para o fim
+        try:
+            w = self.window()
+            if w is not None and getattr(w, "_is_heavy_anim", False):
+                self._pending_icon = icon
+                self._ensure_pending_icon_timer()
+                return False
+        except Exception:
+            pass
+
         # Sinalizamos para ignorar o windowIconChanged do mesmo ciclo
         self._suppress_next_win_icon_changed = True
         try:
@@ -286,6 +308,36 @@ class TitleBar(QWidget):
             self._icon.show()
             self._lbl.hide()
         return ok
+
+    def _ensure_pending_icon_timer(self):
+        try:
+            if self._pending_icon_timer is None:
+                self._pending_icon_timer = QTimer(self)
+                self._pending_icon_timer.setSingleShot(True)
+                self._pending_icon_timer.timeout.connect(self._apply_pending_icon_if_ready)
+            # tenta novamente em ~50ms
+            self._pending_icon_timer.start(50)
+        except Exception:
+            pass
+
+    def _apply_pending_icon_if_ready(self):
+        try:
+            if self._pending_icon is None:
+                return
+            w = self.window()
+            if w is not None and getattr(w, "_is_heavy_anim", False):
+                # ainda pesado → reagendar
+                self._ensure_pending_icon_timer()
+                return
+            icon = self._pending_icon
+            self._pending_icon = None
+        except Exception:
+            icon = None
+        if icon is not None:
+            try:
+                self.setIcon(icon)
+            except Exception:
+                pass
 
     # aliases p/ compatibilidade
     def set_icon(self, icon: Union[str, QPixmap, QIcon]) -> bool:

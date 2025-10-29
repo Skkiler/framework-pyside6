@@ -1,3 +1,5 @@
+# ui/core/utils/helpers.py
+
 # Consolidated helpers for UI, animation, shadow, resize, buttons, and theme
 from PySide6.QtCore import QPropertyAnimation, QObject, QEasingCurve, QPoint, QRect, QSize
 from PySide6.QtWidgets import QWidget, QGraphicsDropShadowEffect, QPushButton, QVBoxLayout, QHBoxLayout
@@ -52,12 +54,32 @@ def is_hex(value: Any) -> bool:
     return isinstance(value, str) and value.strip().startswith("#")
 
 def lerp_color(a: QColor, b: QColor, t: float) -> QColor:
-    return QColor(
-        int(a.red()   + (b.red()   - a.red())   * t),
-        int(a.green() + (b.green() - a.green()) * t),
-        int(a.blue()  + (b.blue()  - a.blue())  * t),
-        int(a.alpha() + (b.alpha() - a.alpha()) * t),
-    )
+    """Perceptually smoother blend using simple gamma-corrected sRGB mixing.
+    Falls back to linear if any error occurs.
+    """
+    try:
+        import math
+
+        def to_lin(c: int) -> float:
+            x = max(0.0, min(1.0, c / 255.0))
+            return math.pow(x, 2.2)
+
+        def to_srgb(x: float) -> int:
+            x = max(0.0, min(1.0, x))
+            return int(round(math.pow(x, 1.0 / 2.2) * 255.0))
+
+        r = to_srgb(to_lin(a.red())   * (1.0 - t) + to_lin(b.red())   * t)
+        g = to_srgb(to_lin(a.green()) * (1.0 - t) + to_lin(b.green()) * t)
+        b_ = to_srgb(to_lin(a.blue())  * (1.0 - t) + to_lin(b.blue())  * t)
+        a_ = int(round(a.alpha() * (1.0 - t) + b.alpha() * t))
+        return QColor(r, g, b_, a_)
+    except Exception:
+        return QColor(
+            int(a.red()   + (b.red()   - a.red())   * t),
+            int(a.green() + (b.green() - a.green()) * t),
+            int(a.blue()  + (b.blue()  - a.blue())  * t),
+            int(a.alpha() + (b.alpha() - a.alpha()) * t),
+        )
 
 def rgba_from_hex(hex_str: str, alpha: float) -> str:
     c = QColor(hex_str)

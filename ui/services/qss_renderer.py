@@ -117,6 +117,17 @@ def _normalize_vars(tokens: dict | None) -> dict:
 
     return vars_
 
+_ANIM_QSS_CACHE: dict[tuple[int, tuple[tuple[str, str], ...]], str] = {}
+_ANIM_CACHE_ENABLED: bool = True  # pode ser desabilitado facilmente
+
+
+def clear_anim_qss_cache() -> None:
+    try:
+        _ANIM_QSS_CACHE.clear()
+    except Exception:
+        pass
+
+
 def render_qss_from_base(base_qss: str, tokens: dict, *, debug_dump_path: str | None = None) -> str:
     """
     Substitui placeholders de forma robusta:
@@ -127,6 +138,16 @@ def render_qss_from_base(base_qss: str, tokens: dict, *, debug_dump_path: str | 
       - Opcionalmente grava o QSS final em debug_dump_path.
     """
     vars_ = _normalize_vars(tokens)
+
+    # Cache leve durante animação (sem dump)
+    if _ANIM_CACHE_ENABLED and debug_dump_path is None:
+        try:
+            key = (hash(base_qss), tuple(sorted((str(k), str(v)) for k, v in vars_.items())))
+            hit = _ANIM_QSS_CACHE.get(key)
+            if hit is not None:
+                return hit
+        except Exception:
+            pass
 
     out = base_qss
 
@@ -160,5 +181,13 @@ def render_qss_from_base(base_qss: str, tokens: dict, *, debug_dump_path: str | 
             Path(debug_dump_path).write_text(out, encoding="utf-8")
         except Exception:
             pass
+    else:
+        # guarda no cache de animação
+        if _ANIM_CACHE_ENABLED:
+            try:
+                key = (hash(base_qss), tuple(sorted((str(k), str(v)) for k, v in vars_.items())))
+                _ANIM_QSS_CACHE[key] = out
+            except Exception:
+                pass
 
     return out

@@ -446,6 +446,76 @@ class AppShell(FramelessWindow):
         except Exception as e:
             print("[WARN] QuickOpen indisponível:", e)
 
+    # ---------------------- Hooks de animação pesada (tema) ----------------------
+    def _begin_heavy_anim(self) -> None:
+        """Sinaliza animação pesada: suspende cosméticos (toolbar/menus) e hovers."""
+        try:
+            setattr(self, "_is_heavy_anim", True)
+        except Exception:
+            pass
+        # Toolbar por página: pausa hover/timers e desabilita updates
+        try:
+            if hasattr(self, "toolbar_area") and self.toolbar_area is not None:
+                self.toolbar_area.setUpdatesEnabled(False)
+                # tenta localizar widget toolbar no layout
+                tb = None
+                try:
+                    lay = getattr(self, "_toolbar_layout", None)
+                    if lay is not None:
+                        for i in range(lay.count()):
+                            it = lay.itemAt(i)
+                            if it and it.widget():
+                                tb = it.widget(); break
+                except Exception:
+                    tb = None
+                if tb is not None and hasattr(tb, "pause_hover"):
+                    try:
+                        tb.pause_hover(True)  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+            # Também reduz updates visuais na TitleBar (cosmético)
+            if hasattr(self, "titlebar") and self.titlebar is not None:
+                try:
+                    self.titlebar.setUpdatesEnabled(False)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _end_heavy_anim(self) -> None:
+        """Retoma estado após animação pesada."""
+        try:
+            setattr(self, "_is_heavy_anim", False)
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "toolbar_area") and self.toolbar_area is not None:
+                # tenta localizar toolbar para retomar hover
+                tb = None
+                try:
+                    lay = getattr(self, "_toolbar_layout", None)
+                    if lay is not None:
+                        for i in range(lay.count()):
+                            it = lay.itemAt(i)
+                            if it and it.widget():
+                                tb = it.widget(); break
+                except Exception:
+                    tb = None
+                if tb is not None and hasattr(tb, "pause_hover"):
+                    try:
+                        tb.pause_hover(False)  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+                # reabilita updates da área visual
+                self.toolbar_area.setUpdatesEnabled(True)
+            if hasattr(self, "titlebar") and self.titlebar is not None:
+                try:
+                    self.titlebar.setUpdatesEnabled(True)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     # ---------------------- Notificações: helpers ----------------------
 
     def _clear_notifications_from_topbar(self):
@@ -708,6 +778,12 @@ class AppShell(FramelessWindow):
     def _update_app_icon_for_theme(self, theme_name: str | None) -> None:
         """Resolve arquivo do ícone para o tema e aplica."""
         try:
+            # Evita I/O/varreduras durante a interpolação de tema
+            if getattr(self, "_is_heavy_anim", False):
+                # reagenda para depois (evita loop: flag será baixada no finished())
+                QTimer.singleShot(60, lambda: self._update_app_icon_for_theme(theme_name))
+                return
+
             if not theme_name:
                 theme_name = self._current_theme_name_safe()
             path = self._resolve_app_icon_path(theme_name)

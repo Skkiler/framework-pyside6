@@ -10,7 +10,7 @@ from PySide6.QtCore import QObject, Signal, QTimeLine, QFileSystemWatcher, QTime
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication, QWidget
 
-from ui.services.qss_renderer import load_base_qss, render_qss_from_base
+from ui.services.qss_renderer import load_base_qss, render_qss_from_base, clear_anim_qss_cache
 from .settings import Settings
 from .interface_ports import IThemeRepository
 from ui.core.utils.helpers import is_hex, lerp_color, rgba_from_hex, coerce_vars, make_tokens
@@ -58,6 +58,13 @@ class ThemeService(QObject):
         self._qss_cache: dict[str, str] = {}
         self._last_qss_hash: Optional[int] = None
         self._themes_changed_debounce: Optional[QTimeLine] = None
+
+        # Métricas e throttle para animação/QSS
+        self._debug_log_stylesheet_counts: bool = False  # habilite manualmente p/ logging
+        self._ss_counts: dict[str, int] = {"root": 0, "app": 0}
+        self._last_apply_ts: float = 0.0
+        self._last_token_broadcast: float = 0.0
+        self._is_heavy_anim: bool = False
 
         # QSS base (conteúdo do arquivo) + caminho (para watcher opcional)
         self._base_qss_path = Path(base_qss_path) if base_qss_path else None
@@ -291,16 +298,19 @@ class ThemeService(QObject):
         try:
             if callable(begin_heavy):
                 begin_heavy()
+            # Marca heavy anim internamente quando houver interpolação
+            self._is_heavy_anim = bool(animate and old_theme)
 
             if animate and old_theme:
+                # guarda para emitir no finished()
+                self._pending_theme_name = theme_name
                 self._animate_apply(old_theme, new_theme, duration_ms or self._animate_ms_default)
             else:
                 self._apply_now(new_theme, cache_key=theme_name)
-
-            self._current_name = theme_name
-            if persist:
-                self._settings.write("theme", theme_name)
-            self.themeApplied.emit(theme_name)
+                self._current_name = theme_name
+                if persist:
+                    self._settings.write("theme", theme_name)
+                self.themeApplied.emit(theme_name)
         finally:
             # se houver animação, end_heavy será chamado no finished() também,
             # mas chamamos aqui como salvaguarda.
@@ -339,7 +349,7 @@ class ThemeService(QObject):
                 pal.setColor(getattr(QPalette, role_name), QColor(hex_color))
         app.setPalette(pal)
 
-    def apply_theme_interpolated(self, start_tokens: dict, end_tokens: dict, steps: int = 28):
+    def apply_theme_interpolated(self, start_tokens: dict, end_tokens: dict, steps: int = 60):
         """
         Interpola os tokens do tema em pequenos passos e aplica o QSS ao final.
         """
@@ -368,13 +378,47 @@ class ThemeService(QObject):
         self._interpolation_step += 1
         if self._interpolation_step > self._interpolation_steps:
             self._timer.stop()
-            self._apply_qss(self._interpolated_tokens)
-
-    def _apply_qss(self, tokens: dict):
+            # Caminho legado: aplica tokens no root (leve)
+            self._apply_qss_tokens(self._interpolated_tokens)
+    def _apply_qss_tokens(self, vars_only: Dict[str, Any]) -> None:
+        """Aplicação leve durante animação: renderiza QSS só com tokens e aplica no ROOT.
+        Inclui throttling (~60fps) e reduz frequência de emissão de tokens (≤ ~15Hz).
+        """
+        app = QApplication.instance()
+        if not app:
+            return
+        tokens = make_tokens(coerce_vars(vars_only))
         qss = render_qss_from_base(self._base_qss, tokens)
-        self._root.setStyleSheet(qss)
+        # Throttle básico: ~16ms (ajustável para limitar chamadas totais ≤ ~10)
+        import time
+        now = time.monotonic()
+        min_interval = getattr(self, "_anim_min_interval_s", 0.016)
+        if self._last_apply_ts and (now - self._last_apply_ts) < float(min_interval):
+            # Ainda assim, emite tokens a cada ~66ms
+            if (now - self._last_token_broadcast) > 0.066:
+                self._last_token_broadcast = now
+                try:
+                    self.themeTokensChanged.emit(tokens)
+                except Exception:
+                    pass
+            return
+        self._last_apply_ts = now
+        try:
+            if self._root:
+                self._root.setStyleSheet(qss)
+                self._ss_counts["root"] = self._ss_counts.get("root", 0) + 1
+        except Exception:
+            pass
+        finally:
+            # Broadcast leve dos tokens para re-render de ícones, etc.
+            if (now - self._last_token_broadcast) > 0.066:
+                self._last_token_broadcast = now
+                try:
+                    self.themeTokensChanged.emit(tokens)
+                except Exception:
+                    pass
 
-    def _apply_qss(self, theme: Dict[str, Any], *, dump: bool = False, cache_key: Optional[str] = None) -> None:
+    def _apply_qss_full(self, theme: Dict[str, Any], *, dump: bool = False, cache_key: Optional[str] = None) -> None:
         """Aplica QSS completo. Opcionalmente grava dump em disco (custa caro)."""
         vars_map = coerce_vars(theme)
         tokens = make_tokens(vars_map)
@@ -395,12 +439,17 @@ class ThemeService(QObject):
         # Apply on the root window; stylesheet propagates to children
         try:
             if self._root:
-                self._root.setStyleSheet(qss)
+                try:
+                    self._root.setStyleSheet(qss)
+                    self._ss_counts["root"] = self._ss_counts.get("root", 0) + 1
+                except Exception:
+                    pass
             # Also apply at application level so floating top-levels (e.g., Toast) inherit
             app = QApplication.instance()
             if app is not None:
                 try:
                     app.setStyleSheet(qss)
+                    self._ss_counts["app"] = self._ss_counts.get("app", 0) + 1
                 except Exception:
                     # fallback defensivo
                     pass
@@ -411,19 +460,8 @@ class ThemeService(QObject):
         self.themeTokensChanged.emit(tokens)
 
     def _apply_qss_light(self, vars_only: Dict[str, Any]) -> None:
-        app = QApplication.instance()
-        if not app:
-            return
-        tokens = make_tokens(vars_only)
-        qss = render_qss_from_base(self._base_qss, tokens)
-        try:
-            # >>> antes: app.setStyleSheet(qss)
-            self._root.setStyleSheet(qss)
-        except Exception:
-            pass
-        finally:
-            # durante animação: broadcast dos tokens mixados (pra re-rasterizar ícones, etc.)
-            self.themeTokensChanged.emit(tokens)
+        """Compat: usa o caminho leve renomeado."""
+        self._apply_qss_tokens(vars_only)
 
 
     def _apply_now(self, theme: Dict[str, Any], *, dump: bool = False, cache_key: Optional[str] = None) -> None:
@@ -437,8 +475,20 @@ class ThemeService(QObject):
         except Exception:
             pass
 
+        # Limpa cache leve (se houver) antes da aplicação completa final
+        try:
+            clear_anim_qss_cache()
+        except Exception:
+            pass
         self._apply_palette_min(theme)
-        self._apply_qss(theme, dump=dump, cache_key=cache_key)
+        self._apply_qss_full(theme, dump=dump, cache_key=cache_key)
+        if self._debug_log_stylesheet_counts:
+            try:
+                print(f"[ThemeService][apply_now] setStyleSheet root={self._ss_counts.get('root',0)} app={self._ss_counts.get('app',0)}")
+            except Exception:
+                pass
+            finally:
+                self._ss_counts = {"root": 0, "app": 0}
 
     def _animate_apply(self, old: Dict[str, Any], new: Dict[str, Any], ms: int) -> None:
         if self._timeline:
@@ -448,9 +498,34 @@ class ThemeService(QObject):
                 pass
             self._timeline = None
 
-        self._timeline = QTimeLine(max(80, int(ms)), self)
-        self._timeline.setFrameRange(0, 100)
-        self._timeline.setUpdateInterval(33)  # ~30 FPS para reduzir custo
+        duration_eff = max(160, int(ms))
+        # marca heavy anim para consumidores do serviço
+        self._is_heavy_anim = True
+        self._timeline = QTimeLine(duration_eff, self)  # duração mínima maior para suavidade
+        self._timeline.setFrameRange(0, 200)
+        # Easing natural para reduzir percepção de stepping
+        try:
+            self._timeline.setCurveShape(QTimeLine.CurveShape.EaseInOutCurve)
+        except Exception:
+            try:
+                self._timeline.setCurveShape(QTimeLine.EaseInOutCurve)
+            except Exception:
+                pass
+        try:
+            # Drive updates fast enough to support ~60 visible frames
+            self._timeline.setUpdateInterval(6)
+        except Exception:
+            pass
+        # Ajusta throttle de aplicação leve para limitar setStyleSheet a ≤ ~10 por troca
+        try:
+            fps = int(max(24, min(60, getattr(self, "_target_anim_fps", 60))))
+            if duration_eff >= 800:
+                fps = min(fps, 48)
+            if duration_eff >= 1400:
+                fps = min(fps, 36)
+            self._anim_min_interval_s = max(0.008, 1.0 / float(fps))
+        except Exception:
+            self._anim_min_interval_s = 0.016
 
         old_vars = coerce_vars(old)
         new_vars = coerce_vars(new)
@@ -463,15 +538,24 @@ class ThemeService(QObject):
         end_heavy: Optional[Callable[[], None]] = getattr(self._root, "_end_heavy_anim", None)
 
         def _frame_changed(i: int):
-            t = i / 100.0
-            mix_vars = dict(new_vars)
+            try:
+                denom = float(self._timeline.endFrame()) if self._timeline else 100.0
+            except Exception:
+                denom = 100.0
+            t = i / denom if denom else 1.0
+            if t < 0.0:
+                t = 0.0
+            elif t > 1.0:
+                t = 1.0
+            # Use old vars as baseline so non-hex changes don't jump mid-animation
+            mix_vars = dict(old_vars)
             for k in keys:
                 ca, cb = QColor(old_vars[k]), QColor(new_vars[k])
                 mix_vars[k] = lerp_color(ca, cb, t).name(
                     QColor.HexArgb if (ca.alpha() != 255 or cb.alpha() != 255) else QColor.HexRgb
                 )
-            # aplica somente no ROOT durante a animação
-            self._apply_qss_light(mix_vars)
+            # aplica somente no ROOT durante a animação (leve)
+            self._apply_qss_tokens(mix_vars)
 
         def _finished():
             try:
@@ -484,10 +568,44 @@ class ThemeService(QObject):
                     pass
 
                 self._apply_now(new, dump=True)
+
+                # --- NOVO BLOCO: efetiva tema atual e emite sinal só AGORA ---
+                try:
+                    pending = getattr(self, "_pending_theme_name", None)
+                    if pending:
+                        self._current_name = pending
+                        # persiste se possível (mesma regra do apply)
+                        try:
+                            self._settings.write("theme", pending)
+                        except Exception:
+                            pass
+                        self.themeApplied.emit(pending)
+                        try:
+                            delattr(self, "_pending_theme_name")
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                # -------------------------------------------------------------
             finally:
                 if callable(end_heavy):
                     end_heavy()
                 self._timeline = None
+                # reset throttles/metrics
+                self._last_apply_ts = 0.0
+                self._last_token_broadcast = 0.0
+                self._is_heavy_anim = False
+                try:
+                    delattr(self, "_anim_min_interval_s")
+                except Exception:
+                    pass
+                if self._debug_log_stylesheet_counts:
+                    try:
+                        print(f"[ThemeService][anim_end] setStyleSheet root={self._ss_counts.get('root',0)} app={self._ss_counts.get('app',0)}")
+                    except Exception:
+                        pass
+                    finally:
+                        self._ss_counts = {"root": 0, "app": 0}
 
         self._timeline.frameChanged.connect(_frame_changed)
         self._timeline.finished.connect(_finished)

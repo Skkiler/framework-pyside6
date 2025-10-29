@@ -1,3 +1,5 @@
+# ui/widgets/toolbar.py
+
 from __future__ import annotations
 
 from typing import Callable, List, Optional, Sequence, Dict, Any
@@ -25,6 +27,7 @@ class Toolbar(QFrame):
         super().__init__(parent)
         self.setObjectName("PageToolbar")
         self.setAttribute(Qt.WA_StyledBackground, True)
+        self._paused_hover: bool = False
 
         row = QHBoxLayout(self)
         row.setContentsMargins(8, 6, 8, 6)
@@ -61,6 +64,18 @@ class Toolbar(QFrame):
         mb = ToolbarMenuButton(label, items, open_mode=open_mode, parent=self)
         self.add_widget(mb)
         return mb
+
+    def pause_hover(self, paused: bool):
+        """Pausa/resume comportamentos de hover/guard nos botões de menu da toolbar."""
+        try:
+            self._paused_hover = bool(paused)
+            for child in self.findChildren(ToolbarMenuButton):
+                try:
+                    child.pause_hover(paused)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
 
 class _MenuPanel(QMenu):
@@ -122,6 +137,7 @@ class ToolbarMenuButton(QPushButton):
         self._panel: Optional[_MenuPanel] = None
         self._opened_by_click: bool = False
         self._suppress_hover_until_leave: bool = False  # evita reabrir imediatamente após fechar por clique
+        self._hover_paused: bool = False
         # Guarda proativa: verifica periodicamente se o cursor ainda está na
         # região permitida (botão + cadeia de painéis). Evita falsos fechamentos.
         self._hover_guard = QTimer(self)
@@ -139,6 +155,8 @@ class ToolbarMenuButton(QPushButton):
 
     def enterEvent(self, _):
         # Entrou no botão → abre por hover se não estiver visível
+        if self._hover_paused:
+            return
         if (self._open_mode in ("hover", "both")) and not (self._panel and self._panel.isVisible()):
             self._hover_timer.start()
 
@@ -296,3 +314,25 @@ class ToolbarMenuButton(QPushButton):
             ToolbarMenuButton._ACTIVE_OWNER = None
             ToolbarMenuButton._ACTIVE_PANEL = None
         self._stop_hover_guard()
+
+    # ---------- API externa: pausa de hover/guard ----------
+    def pause_hover(self, paused: bool):
+        """Interrompe guard/hover timers sem desmontar menus.
+        Quando retomado (paused=False), não reabre menus automaticamente.
+        """
+        try:
+            self._hover_paused = bool(paused)
+            if paused:
+                try:
+                    self._hover_timer.stop()
+                except Exception:
+                    pass
+                try:
+                    self._stop_hover_guard()
+                except Exception:
+                    pass
+            else:
+                # não iniciamos nada automaticamente; retoma em eventos naturais
+                pass
+        except Exception:
+            pass
