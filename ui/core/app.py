@@ -279,13 +279,19 @@ class AppShell(FramelessWindow):
                 persist=False,
             )
 
-        # Tenta restaurar última rota persistida
         try:
-            last_route = self.settings.get("nav.last_route")
-            if isinstance(last_route, str) and last_route in self.router._pages:
-                first_route = last_route
+            force_home = bool(self.settings.get("nav.always_open_home", False))
         except Exception:
-            pass
+            force_home = False
+
+        # Tenta restaurar última rota persistida
+        if not force_home:
+            try:
+                last_route = self.settings.get("nav.last_route")
+                if isinstance(last_route, str) and last_route in self.router._pages:
+                    first_route = last_route
+            except Exception:
+                pass
 
         # Navega para a página inicial/recuperada
         self.router.go(first_route)

@@ -117,11 +117,18 @@ def _normalize_vars(tokens: dict | None) -> dict:
 
     return vars_
 
+# ------------
+# Animação – cache leve
+# ------------
+# O cache utiliza como chave o hash do QSS base e o mapa de tokens
+# normalizados ordenados. Isso evita recompilar todo o QSS em cada frame
+# quando debug_dump_path é None.
 _ANIM_QSS_CACHE: dict[tuple[int, tuple[tuple[str, str], ...]], str] = {}
 _ANIM_CACHE_ENABLED: bool = True  # pode ser desabilitado facilmente
 
 
 def clear_anim_qss_cache() -> None:
+    """Limpa o cache de QSS leve usado durante animações."""
     try:
         _ANIM_QSS_CACHE.clear()
     except Exception:
@@ -139,13 +146,13 @@ def render_qss_from_base(base_qss: str, tokens: dict, *, debug_dump_path: str | 
     """
     vars_ = _normalize_vars(tokens)
 
-    # Cache leve durante animação (sem dump)
+    # Quando debug_dump_path for None usamos o cache leve para animações;
+    # ele evita recomputar o QSS em cada frame e reduz drasticamente o trabalho.
     if _ANIM_CACHE_ENABLED and debug_dump_path is None:
         try:
             key = (hash(base_qss), tuple(sorted((str(k), str(v)) for k, v in vars_.items())))
-            hit = _ANIM_QSS_CACHE.get(key)
-            if hit is not None:
-                return hit
+            if key in _ANIM_QSS_CACHE:
+                return _ANIM_QSS_CACHE[key]
         except Exception:
             pass
 
@@ -175,19 +182,18 @@ def render_qss_from_base(base_qss: str, tokens: dict, *, debug_dump_path: str | 
     # 5) limpeza final – se ainda sobrou {qualquer_coisa}, troca por 'transparent'
     out = _RX_ANY_TOKEN.sub("transparent", out)
 
-    # 6) dump opcional
+    # 6) dump opcional: grava se debug_dump_path está definido.
+    # Se não houver dump, armazena no cache leve.
     if debug_dump_path:
         try:
             Path(debug_dump_path).write_text(out, encoding="utf-8")
         except Exception:
             pass
-    else:
-        # guarda no cache de animação
-        if _ANIM_CACHE_ENABLED:
-            try:
-                key = (hash(base_qss), tuple(sorted((str(k), str(v)) for k, v in vars_.items())))
-                _ANIM_QSS_CACHE[key] = out
-            except Exception:
-                pass
+    elif _ANIM_CACHE_ENABLED:
+        try:
+            key = (hash(base_qss), tuple(sorted((str(k), str(v)) for k, v in vars_.items())))
+            _ANIM_QSS_CACHE[key] = out
+        except Exception:
+            pass
 
     return out

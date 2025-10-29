@@ -187,6 +187,36 @@ class SettingsPage(QWidget):
         start_row.addStretch(1)
         lg.addLayout(start_row)
 
+        # Toggle rota inicial
+        home_row = QHBoxLayout()
+        home_row.setContentsMargins(0, 0, 0, 0)
+        home_row.setSpacing(8)
+
+        self.tgl_force_home = Controls.Toggle(width=34, height=18)
+        force_home = bool(self._st.read("nav.always_open_home", False))
+        self.tgl_force_home.setChecked(force_home)
+
+        self.lbl_force_home = QLabel()
+
+        def _update_home_label(checked: bool):
+            self.lbl_force_home.setText(
+                "Sempre abrir na página inicial" if checked
+                else "Reabrir última página acessada"
+            )
+
+        _update_home_label(self.tgl_force_home.isChecked())
+
+        def _on_home_toggle(checked: bool):
+            self._st.write("nav.always_open_home", bool(checked))
+            _update_home_label(checked)
+
+        self.tgl_force_home.toggled.connect(_on_home_toggle)
+
+        home_row.addWidget(self.tgl_force_home)
+        home_row.addWidget(self.lbl_force_home)
+        home_row.addStretch(1)
+        lg.addLayout(home_row)
+
         placeholder = QLabel("Mais opções em breve…")
         placeholder.setStyleSheet("opacity:0.7; font-size:11px;")
         lg.addWidget(placeholder)
